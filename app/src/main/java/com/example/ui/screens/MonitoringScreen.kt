@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -58,6 +60,9 @@ import com.example.ui.theme.BrownPrimary
 import com.example.ui.theme.TicketGreenPass
 import com.example.ui.theme.TicketRedBlock
 import com.example.viewmodel.AttendanceViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun MonitoringScreen(
@@ -74,6 +79,58 @@ fun MonitoringScreen(
     val studentSummaries = viewModel.getFilteredStudents(allRecords)
     val eligibleCount = studentSummaries.count { it.isEligibleToGoHome }
     val totalCount = studentSummaries.size
+
+    // Launcher resmi Android untuk menyimpan file CSV (Excel) langsung ke folder Downloads / Drive HP
+    val exportCsvLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                val sb = StringBuilder()
+                // Tambahkan BOM UTF-8 agar karakter simbol & spasi terbaca rapi saat dibuka di Microsoft Excel
+                sb.append("\uFEFF")
+                sb.append("No,NISN,Nama Lengkap,Jurusan,Kelas,Tanggal,Dhuha (Sunnah),Dzuhur,Ashar,Status Halangan Syar'i,Status Izin Pulang\n")
+
+                studentSummaries.forEachIndexed { index, item ->
+                    val dhuhaText = when (item.dhuhaStatus) {
+                        DhuhaStatus.HADIR -> "Hadir"
+                        DhuhaStatus.TIDAK_HADIR -> "Tidak Hadir"
+                        DhuhaStatus.BELUM_MEMILIH -> "Belum Memilih"
+                    }
+                    val dzuhurText = item.dzuhurRecord?.formattedTime ?: "Belum Absen"
+                    val asharText = item.asharRecord?.formattedTime ?: "Belum Absen"
+                    val halanganText = if (item.isCurrentlyOnPeriod) {
+                        "Berhalangan (${item.periodRecord?.estimatedDays ?: 5} hari)"
+                    } else {
+                        "Tidak"
+                    }
+                    val izinPulangText = if (item.isEligibleToGoHome) "Boleh Pulang" else "Tahan"
+                    val safeName = "\"${item.student.fullName.replace("\"", "\"\"")}\""
+                    val safeKelas = "\"${item.student.kelas ?: "-"}\""
+                    val jurusanCode = item.student.jurusan?.code ?: "-"
+
+                    sb.append("${index + 1},${item.student.nisnOrNip},$safeName,$jurusanCode,$safeKelas,$todayStr,$dhuhaText,$dzuhurText,$asharText,$halanganText,$izinPulangText\n")
+                }
+
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    outputStream.write(sb.toString().toByteArray(Charsets.UTF_8))
+                }
+
+                Toast.makeText(
+                    context,
+                    "File rekap Excel (.csv) berhasil disimpan!",
+                    Toast.LENGTH_LONG
+                ).show()
+            } catch (e: Exception) {
+                Toast.makeText(
+                    context,
+                    "Gagal menyimpan file: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -106,20 +163,18 @@ fun MonitoringScreen(
                 )
             }
 
-            // Export / Download Report Action for Admins
+            // Export / Download Report Action for Admins & Teachers
             IconButton(
                 onClick = {
-                    Toast.makeText(
-                        context,
-                        "Laporan Kehadiran Sholat berhasil diunduh (Excel / PDF)",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    val todayFile = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                    val filterLabel = selectedJurusan?.code ?: "SemuaJurusan"
+                    exportCsvLauncher.launch("Rekap_Sholat_${filterLabel}_$todayFile.csv")
                 },
                 modifier = Modifier.testTag("export_report_button")
             ) {
                 Icon(
                     imageVector = Icons.Default.Download,
-                    contentDescription = "Unduh Laporan",
+                    contentDescription = "Unduh Laporan Excel",
                     tint = BrownPrimary
                 )
             }
