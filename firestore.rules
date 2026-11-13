@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidUser(data) {
+      return data.nisnOrNip is string && data.nisnOrNip.size() > 0 &&
+             data.fullName is string && data.fullName.size() > 0 &&
+             data.role in ['ADMIN_PUSAT', 'ADMIN_GURU', 'SISWA'] &&
+             data.gender in ['LAKI_LAKI', 'PEREMPUAN'] &&
+             data.avatarEmoji is string &&
+             data.password is string;
+    }
+
+    function isValidAttendance(data) {
+      return data.nisn is string && data.nisn.size() > 0 &&
+             data.studentName is string && data.studentName.size() > 0 &&
+             data.jurusan is string &&
+             data.kelas is string &&
+             data.prayerType in ['DHUHA', 'DZUHUR', 'ASHAR'] &&
+             data.dateString is string &&
+             data.timestampMillis is number &&
+             data.formattedTime is string &&
+             data.isVerifiedInMosque is bool &&
+             data.isHalanganSyari is bool &&
+             data.dhuhaStatus in ['HADIR', 'TIDAK_HADIR', 'BELUM_MEMILIH'];
+    }
+
+    function isValidPeriod(data) {
+      return data.nisn is string && data.nisn.size() > 0 &&
+             data.startDateString is string &&
+             data.estimatedDays is number && data.estimatedDays >= 3 && data.estimatedDays <= 15 &&
+             data.startTimestampMillis is number &&
+             data.isActive is bool &&
+             data.isManuallyEnded is bool;
+    }
+
+    function isValidQrToken(data) {
+      return data.dateString is string &&
+             data.prayerType is string &&
+             data.tokenCode is string &&
+             data.shortEntryCode is string &&
+             data.generatedAtMillis is number &&
+             data.validUntilMillis is number;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidUser(request.resource.data);
+      allow delete: if isSignedIn();
+    }
+
+    match /attendance_records/{recordId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidAttendance(request.resource.data);
+      allow delete: if isSignedIn();
+    }
+
+    match /period_records/{recordId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidPeriod(request.resource.data);
+      allow delete: if isSignedIn();
+    }
+
+    match /active_qr_tokens/{tokenId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidQrToken(request.resource.data);
+      allow delete: if isSignedIn();
+    }
+  }
+}

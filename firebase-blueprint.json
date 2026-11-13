@@ -1,0 +1,58 @@
+{
+  "title": "Aplikasi Absensi Sholat Berjamaah SMKN 1 Pangkep",
+  "version": "1.0.0",
+  "entities": {
+    "UserProfile": {
+      "collection": "users",
+      "fields": {
+        "nisnOrNip": { "type": "string", "required": true },
+        "fullName": { "type": "string", "required": true },
+        "role": { "type": "string", "enum": ["ADMIN_PUSAT", "ADMIN_GURU", "SISWA"], "required": true },
+        "gender": { "type": "string", "enum": ["LAKI_LAKI", "PEREMPUAN"], "required": true },
+        "jurusan": { "type": "string", "required": false },
+        "kelas": { "type": "string", "required": false },
+        "avatarEmoji": { "type": "string", "required": true },
+        "password": { "type": "string", "required": true }
+      }
+    },
+    "AttendanceRecord": {
+      "collection": "attendance_records",
+      "fields": {
+        "nisn": { "type": "string", "required": true },
+        "studentName": { "type": "string", "required": true },
+        "jurusan": { "type": "string", "required": true },
+        "kelas": { "type": "string", "required": true },
+        "prayerType": { "type": "string", "enum": ["DHUHA", "DZUHUR", "ASHAR"], "required": true },
+        "dateString": { "type": "string", "required": true },
+        "timestampMillis": { "type": "number", "required": true },
+        "formattedTime": { "type": "string", "required": true },
+        "isVerifiedInMosque": { "type": "boolean", "required": true },
+        "isHalanganSyari": { "type": "boolean", "required": true },
+        "dhuhaStatus": { "type": "string", "enum": ["HADIR", "TIDAK_HADIR", "BELUM_MEMILIH"], "required": true }
+      }
+    },
+    "PeriodRecord": {
+      "collection": "period_records",
+      "fields": {
+        "nisn": { "type": "string", "required": true },
+        "startDateString": { "type": "string", "required": true },
+        "estimatedDays": { "type": "number", "required": true },
+        "startTimestampMillis": { "type": "number", "required": true },
+        "isActive": { "type": "boolean", "required": true },
+        "isManuallyEnded": { "type": "boolean", "required": true },
+        "notes": { "type": "string", "required": false }
+      }
+    },
+    "DynamicQrToken": {
+      "collection": "active_qr_tokens",
+      "fields": {
+        "dateString": { "type": "string", "required": true },
+        "prayerType": { "type": "string", "required": true },
+        "tokenCode": { "type": "string", "required": true },
+        "shortEntryCode": { "type": "string", "required": true },
+        "generatedAtMillis": { "type": "number", "required": true },
+        "validUntilMillis": { "type": "number", "required": true }
+      }
+    }
+  }
+}
