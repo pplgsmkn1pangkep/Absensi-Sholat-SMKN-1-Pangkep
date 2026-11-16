@@ -4,6 +4,7 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -147,6 +150,10 @@ fun LoginScreen(
     var password by remember { mutableStateOf(initialPass) }
     var isPasswordVisible by remember { mutableStateOf(false) }
 
+    // Guru / Kaprodi qualification override on login
+    var guruSelectedJurusan by remember { mutableStateOf<Jurusan?>(null) }
+    var guruSelectedKelas by remember { mutableStateOf<String?>(null) }
+
     // Student Registration Form State
     var regFullName by remember { mutableStateOf("") }
     var regKelas by remember { mutableStateOf("") }
@@ -219,10 +226,11 @@ fun LoginScreen(
 
         // Sub Judul Aplikasi
         Text(
-            text = "Absensi Sholat Berjamaah",
+            text = "SIM SHOLAT",
             color = BrownDark,
             fontWeight = FontWeight.Black,
-            fontSize = 19.sp,
+            fontSize = 22.sp,
+            letterSpacing = 1.sp,
             textAlign = TextAlign.Center
         )
 
@@ -238,7 +246,7 @@ fun LoginScreen(
         )
 
         Text(
-            text = "Sistem Presensi Berbasis QR Dinamis & Syarat Izin Pulang",
+            text = "Sistem Informasi Monitoring Sholat & Izin Pulang Siswa",
             color = Color.Gray,
             fontSize = 10.5.sp,
             textAlign = TextAlign.Center,
@@ -286,13 +294,13 @@ fun LoginScreen(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = "Buka via Website / Pasang di HP",
+                            text = "Pasang Aplikasi di HP",
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.5.sp,
                             color = ScanGreenDark
                         )
                         Text(
-                            text = "Scan QR akses website atau pasang APK permanen",
+                            text = "Scan barcode Google Drive untuk unduh & pasang APK di HP",
                             fontSize = 9.5.sp,
                             color = ScanGreenDark.copy(alpha = 0.85f)
                         )
@@ -670,7 +678,7 @@ fun LoginScreen(
                     Text(
                         text = when (selectedRoleIndex) {
                             0 -> "Masuk Sebagai Siswa"
-                            1 -> "Masuk Sebagai Admin Guru / Wali Kelas"
+                            1 -> "Masuk Sebagai Guru / Kaprodi"
                             else -> "Masuk Sebagai Admin Pusat / Kepsek"
                         },
                         fontWeight = FontWeight.Bold,
@@ -681,7 +689,7 @@ fun LoginScreen(
                     Text(
                         text = when (selectedRoleIndex) {
                             0 -> "Gunakan NISN dan kata sandi Anda yang terdaftar"
-                            1 -> "Guru Agama, Wali Kelas, dan Kaprodi 7 Jurusan"
+                            1 -> "Guru Agama, Wali Kelas & Kaprodi (terkualifikasi per jurusan)"
                             else -> "Kepala Sekolah & Operator Administrasi Sekolah"
                         },
                         fontSize = 11.sp,
@@ -750,6 +758,106 @@ fun LoginScreen(
                             focusedLabelColor = if (selectedRoleIndex == 0) ScanGreenPrimary else BrownPrimary
                         )
                     )
+
+                    // Guru / Kaprodi Jurusan & Kelas Qualification Selector
+                    if (selectedRoleIndex == 1) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = CreamCardBg,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CreamCardBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = "Kualifikasi Jurusan & Kelas Pemantauan:",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BrownDark
+                                )
+                                Text(
+                                    text = "Pilih jurusan/kelas Anda agar hanya memantau siswa yang Anda ampu",
+                                    fontSize = 10.sp,
+                                    color = Color.Gray
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    FilterChip(
+                                        selected = guruSelectedJurusan == null,
+                                        onClick = {
+                                            guruSelectedJurusan = null
+                                            guruSelectedKelas = null
+                                        },
+                                        label = { Text("Sesuai Akun", fontSize = 11.sp) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = BrownPrimary,
+                                            selectedLabelColor = Color.White
+                                        )
+                                    )
+                                    Jurusan.entries.forEach { jur ->
+                                        FilterChip(
+                                            selected = guruSelectedJurusan == jur,
+                                            onClick = {
+                                                guruSelectedJurusan = jur
+                                                guruSelectedKelas = null
+                                            },
+                                            label = { Text(jur.code, fontSize = 11.sp) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = ScanGreenPrimary,
+                                                selectedLabelColor = Color.White
+                                            ),
+                                            modifier = Modifier.testTag("login_guru_jurusan_${jur.code}")
+                                        )
+                                    }
+                                }
+
+                                if (guruSelectedJurusan != null) {
+                                    val classesForJurusan = remember(guruSelectedJurusan) {
+                                        viewModel.repository.getKnownClassesForJurusan(guruSelectedJurusan)
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Pilih Kelas (opsional untuk Wali Kelas):",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = BrownMedium
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        FilterChip(
+                                            selected = guruSelectedKelas == null,
+                                            onClick = { guruSelectedKelas = null },
+                                            label = { Text("Semua Kelas ${guruSelectedJurusan?.code}", fontSize = 10.5.sp) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = BrownPrimary,
+                                                selectedLabelColor = Color.White
+                                            )
+                                        )
+                                        classesForJurusan.forEach { cls ->
+                                            FilterChip(
+                                                selected = guruSelectedKelas == cls,
+                                                onClick = { guruSelectedKelas = cls },
+                                                label = { Text(cls, fontSize = 10.5.sp) },
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = BrownPrimary,
+                                                    selectedLabelColor = Color.White
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
@@ -823,7 +931,13 @@ fun LoginScreen(
                                 Toast.makeText(context, "Silakan isi NISN/Username dan Kata Sandi.", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
-                            val success = viewModel.login(usernameOrNisn, targetRole, password)
+                            val success = viewModel.login(
+                                usernameOrNisn = usernameOrNisn,
+                                role = targetRole,
+                                passwordInput = password,
+                                selectedJurusanOverride = if (selectedRoleIndex == 1) guruSelectedJurusan else null,
+                                selectedKelasOverride = if (selectedRoleIndex == 1 && guruSelectedJurusan != null) guruSelectedKelas else null
+                            )
                             if (success) {
                                 val roleKey = getRoleKey(selectedRoleIndex)
                                 if (rememberMe) {

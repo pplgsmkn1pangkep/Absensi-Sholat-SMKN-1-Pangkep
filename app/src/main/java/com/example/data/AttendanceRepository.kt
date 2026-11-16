@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
@@ -61,7 +62,8 @@ class AttendanceRepository(
             role = Role.ADMIN_GURU,
             gender = Gender.LAKI_LAKI,
             avatarEmoji = "👳",
-            password = "guru"
+            password = "guru",
+            jabatan = "Guru Agama / Piket Masjid"
         ),
         UserProfile(
             id = "guru-02",
@@ -72,7 +74,8 @@ class AttendanceRepository(
             jurusan = Jurusan.PPLG,
             kelas = "XII PPLG 1",
             avatarEmoji = "👨‍🏫",
-            password = "guru"
+            password = "guru",
+            jabatan = "Wali Kelas"
         ),
         UserProfile(
             id = "guru-03",
@@ -82,7 +85,8 @@ class AttendanceRepository(
             gender = Gender.PEREMPUAN,
             jurusan = Jurusan.PPLG,
             avatarEmoji = "👩‍💼",
-            password = "guru"
+            password = "guru",
+            jabatan = "Kaprodi"
         ),
 
         // 3. Siswa (All 7 Majors, including female students)
@@ -121,7 +125,10 @@ class AttendanceRepository(
     init {
         val today = getTodayDateString()
 
-        // Seed initial local fallback attendance
+        val yesterday = getDateStringDaysAgo(1)
+        val twoDaysAgo = getDateStringDaysAgo(2)
+
+        // Seed initial local fallback attendance (Today + Past Days for percentage history)
         val initialList = mutableListOf(
             AttendanceRecord(
                 id = UUID.randomUUID().toString(),
@@ -145,6 +152,142 @@ class AttendanceRepository(
                 dateString = today,
                 timestampMillis = System.currentTimeMillis() - 3 * 3600 * 1000,
                 formattedTime = "12:30 WITA"
+            ),
+            // Yesterday records
+            AttendanceRecord(
+                id = UUID.randomUUID().toString(),
+                nisn = "0061234567",
+                studentName = "Muhammad Fadhil",
+                jurusan = Jurusan.PPLG,
+                kelas = "XII PPLG 1",
+                prayerType = PrayerType.DHUHA,
+                dateString = yesterday,
+                timestampMillis = System.currentTimeMillis() - 28L * 3600 * 1000,
+                formattedTime = "07:25 WITA",
+                dhuhaStatus = DhuhaStatus.HADIR
+            ),
+            AttendanceRecord(
+                id = UUID.randomUUID().toString(),
+                nisn = "0061234567",
+                studentName = "Muhammad Fadhil",
+                jurusan = Jurusan.PPLG,
+                kelas = "XII PPLG 1",
+                prayerType = PrayerType.DZUHUR,
+                dateString = yesterday,
+                timestampMillis = System.currentTimeMillis() - 27L * 3600 * 1000,
+                formattedTime = "12:20 WITA"
+            ),
+            AttendanceRecord(
+                id = UUID.randomUUID().toString(),
+                nisn = "0061234567",
+                studentName = "Muhammad Fadhil",
+                jurusan = Jurusan.PPLG,
+                kelas = "XII PPLG 1",
+                prayerType = PrayerType.ASHAR,
+                dateString = yesterday,
+                timestampMillis = System.currentTimeMillis() - 24L * 3600 * 1000,
+                formattedTime = "15:35 WITA"
+            ),
+            AttendanceRecord(
+                id = UUID.randomUUID().toString(),
+                nisn = "0061234568",
+                studentName = "Ahmad Fauzan R",
+                jurusan = Jurusan.PPLG,
+                kelas = "XII PPLG 1",
+                prayerType = PrayerType.DZUHUR,
+                dateString = yesterday,
+                timestampMillis = System.currentTimeMillis() - 27L * 3600 * 1000,
+                formattedTime = "12:24 WITA"
+            ),
+            AttendanceRecord(
+                id = UUID.randomUUID().toString(),
+                nisn = "0061234568",
+                studentName = "Ahmad Fauzan R",
+                jurusan = Jurusan.PPLG,
+                kelas = "XII PPLG 1",
+                prayerType = PrayerType.ASHAR,
+                dateString = yesterday,
+                timestampMillis = System.currentTimeMillis() - 24L * 3600 * 1000,
+                formattedTime = "15:40 WITA"
+            ),
+            AttendanceRecord(
+                id = UUID.randomUUID().toString(),
+                nisn = "0067654321",
+                studentName = "Nur Aisyah Putri",
+                jurusan = Jurusan.AKL,
+                kelas = "XI AKL 2",
+                prayerType = PrayerType.DZUHUR,
+                dateString = yesterday,
+                timestampMillis = System.currentTimeMillis() - 27L * 3600 * 1000,
+                formattedTime = "12:22 WITA"
+            ),
+            AttendanceRecord(
+                id = UUID.randomUUID().toString(),
+                nisn = "0067654321",
+                studentName = "Nur Aisyah Putri",
+                jurusan = Jurusan.AKL,
+                kelas = "XI AKL 2",
+                prayerType = PrayerType.ASHAR,
+                dateString = yesterday,
+                timestampMillis = System.currentTimeMillis() - 24L * 3600 * 1000,
+                formattedTime = "15:38 WITA"
+            ),
+            AttendanceRecord(
+                id = UUID.randomUUID().toString(),
+                nisn = "0069988776",
+                studentName = "Andi Reski Pratama",
+                jurusan = Jurusan.TJKT,
+                kelas = "X TJKT 1",
+                prayerType = PrayerType.DZUHUR,
+                dateString = yesterday,
+                timestampMillis = System.currentTimeMillis() - 27L * 3600 * 1000,
+                formattedTime = "12:28 WITA"
+            ),
+            // 2 days ago records
+            AttendanceRecord(
+                id = UUID.randomUUID().toString(),
+                nisn = "0061234567",
+                studentName = "Muhammad Fadhil",
+                jurusan = Jurusan.PPLG,
+                kelas = "XII PPLG 1",
+                prayerType = PrayerType.DZUHUR,
+                dateString = twoDaysAgo,
+                timestampMillis = System.currentTimeMillis() - 51L * 3600 * 1000,
+                formattedTime = "12:25 WITA"
+            ),
+            AttendanceRecord(
+                id = UUID.randomUUID().toString(),
+                nisn = "0061234568",
+                studentName = "Ahmad Fauzan R",
+                jurusan = Jurusan.PPLG,
+                kelas = "XII PPLG 1",
+                prayerType = PrayerType.DHUHA,
+                dateString = twoDaysAgo,
+                timestampMillis = System.currentTimeMillis() - 55L * 3600 * 1000,
+                formattedTime = "07:40 WITA",
+                dhuhaStatus = DhuhaStatus.HADIR
+            ),
+            AttendanceRecord(
+                id = UUID.randomUUID().toString(),
+                nisn = "0067654322",
+                studentName = "Budi Darmawan",
+                jurusan = Jurusan.AKL,
+                kelas = "XI AKL 1",
+                prayerType = PrayerType.DZUHUR,
+                dateString = twoDaysAgo,
+                timestampMillis = System.currentTimeMillis() - 51L * 3600 * 1000,
+                formattedTime = "12:29 WITA"
+            ),
+            AttendanceRecord(
+                id = UUID.randomUUID().toString(),
+                nisn = "0067654322",
+                studentName = "Budi Darmawan",
+                jurusan = Jurusan.AKL,
+                kelas = "XI AKL 1",
+                prayerType = PrayerType.ASHAR,
+                dateString = twoDaysAgo,
+                timestampMillis = System.currentTimeMillis() - 48L * 3600 * 1000,
+                formattedTime = "15:32 WITA"
             )
         )
         _attendanceRecords.value = initialList
@@ -258,6 +401,33 @@ class AttendanceRepository(
     fun getTodayDateString(): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         return sdf.format(Date())
+    }
+
+    fun getDateStringDaysAgo(daysAgo: Int): String {
+        val cal = Calendar.getInstance()
+        cal.add(Calendar.DAY_OF_YEAR, -daysAgo)
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        return sdf.format(cal.time)
+    }
+
+    fun formatReadableDate(dateString: String): String {
+        val today = getTodayDateString()
+        val yesterday = getDateStringDaysAgo(1)
+        val parsed = try {
+            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(dateString)
+        } catch (e: Exception) {
+            null
+        }
+        val formatted = if (parsed != null) {
+            SimpleDateFormat("dd MMM yyyy", Locale("id", "ID")).format(parsed)
+        } else {
+            dateString
+        }
+        return when (dateString) {
+            today -> "Hari Ini • $formatted"
+            yesterday -> "Kemarin • $formatted"
+            else -> formatted
+        }
     }
 
     fun getFormattedCurrentTime(): String {
@@ -471,6 +641,20 @@ class AttendanceRepository(
         return getActivePeriodRecord(nisn) != null
     }
 
+    fun isStudentOnPeriodOnDate(nisn: String, dateString: String): Boolean {
+        if (dateString == getTodayDateString()) {
+            return isStudentCurrentlyOnPeriod(nisn)
+        }
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val targetDate = try { sdf.parse(dateString) } catch (e: Exception) { null } ?: return false
+        return _periodRecords.value.any { record ->
+            if (record.nisn != nisn || record.isManuallyEnded) return@any false
+            val startDate = try { sdf.parse(record.startDateString) } catch (e: Exception) { null } ?: return@any false
+            val diffDays = ((targetDate.time - startDate.time) / (24L * 3600 * 1000)).toInt()
+            diffDays in 0 until record.estimatedDays.coerceIn(1, 15)
+        }
+    }
+
     // Start a new Period report with specified estimated days (e.g. 5, 6, 7 days)
     fun reportPeriodStart(student: UserProfile, estimatedDays: Int, notes: String = "") {
         val today = getTodayDateString()
@@ -616,7 +800,8 @@ class AttendanceRepository(
         gender: Gender,
         jurusan: Jurusan?,
         kelas: String?,
-        initialPassword: String = "guru"
+        initialPassword: String = "guru",
+        jabatan: String? = null
     ): Result<UserProfile> {
         val cleanNip = nipOrUsername.trim()
         val cleanName = fullName.trim()
@@ -631,6 +816,7 @@ class AttendanceRepository(
         }
 
         val avatar = if (gender == Gender.PEREMPUAN) "👩‍🏫" else "👨‍🏫"
+        val cleanKelas = kelas?.trim()?.ifEmpty { null }
         val newTeacher = UserProfile(
             id = "guru-${UUID.randomUUID().toString().take(6)}",
             nisnOrNip = cleanNip,
@@ -638,9 +824,10 @@ class AttendanceRepository(
             role = Role.ADMIN_GURU,
             gender = gender,
             jurusan = jurusan,
-            kelas = kelas?.trim()?.ifEmpty { null },
+            kelas = cleanKelas,
             avatarEmoji = avatar,
-            password = initialPassword.trim().ifEmpty { "guru" }
+            password = initialPassword.trim().ifEmpty { "guru" },
+            jabatan = jabatan?.trim()?.ifEmpty { null }
         )
 
         _allUsers.value = _allUsers.value + newTeacher
@@ -650,6 +837,44 @@ class AttendanceRepository(
             ?.addOnFailureListener { Log.w("AttendanceRepo", "Failed to sync teacher to Firestore: ${it.message}") }
 
         return Result.success(newTeacher)
+    }
+
+    fun updateTeacherQualification(
+        userId: String,
+        jurusan: Jurusan?,
+        kelas: String?
+    ): UserProfile? {
+        val existing = _allUsers.value.find { it.id == userId } ?: return null
+        val cleanKelas = kelas?.trim()?.ifEmpty { null }
+        val updated = existing.copy(
+            jurusan = jurusan,
+            kelas = cleanKelas
+        )
+        _allUsers.value = _allUsers.value.map {
+            if (it.id == userId) updated else it
+        }
+        firestore?.collection("users")?.document(userId)?.update(
+            mapOf(
+                "jurusan" to jurusan?.name,
+                "kelas" to cleanKelas
+            )
+        )?.addOnFailureListener {
+            Log.w("AttendanceRepo", "Failed to update teacher qualification in Firestore: ${it.message}")
+        }
+        return updated
+    }
+
+    fun getKnownClassesForJurusan(jurusan: Jurusan?): List<String> {
+        if (jurusan == null) return emptyList()
+        val fromStudents = allStudents
+            .filter { it.jurusan == jurusan }
+            .mapNotNull { it.kelas?.trim()?.takeIf { k -> k.isNotEmpty() } }
+        val defaults = listOf(
+            "X ${jurusan.code} 1",
+            "XI ${jurusan.code} 1",
+            "XII ${jurusan.code} 1"
+        )
+        return (fromStudents + defaults).distinct().sorted()
     }
 
     fun resetPassword(targetUserIdOrNisn: String, newPassword: String): Boolean {
@@ -744,7 +969,8 @@ class AttendanceRepository(
         "jurusan" to u.jurusan?.name,
         "kelas" to u.kelas,
         "avatarEmoji" to u.avatarEmoji,
-        "password" to u.password
+        "password" to u.password,
+        "jabatan" to u.jabatan
     )
 
     private fun mapToUser(docId: String, data: Map<String, Any?>?): UserProfile? {
@@ -765,7 +991,8 @@ class AttendanceRepository(
             jurusan = jurusan,
             kelas = data["kelas"] as? String,
             avatarEmoji = data["avatarEmoji"] as? String ?: "👤",
-            password = data["password"] as? String ?: "123456"
+            password = data["password"] as? String ?: "123456",
+            jabatan = data["jabatan"] as? String
         )
     }
 

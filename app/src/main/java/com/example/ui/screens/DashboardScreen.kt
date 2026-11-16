@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -40,10 +41,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -77,6 +83,7 @@ import com.example.ui.theme.ScanGreenPrimary
 import com.example.ui.theme.TicketGreenPass
 import com.example.ui.theme.TicketRedBlock
 import com.example.ui.components.InstallAppDialog
+import com.example.ui.components.TeacherPercentageTab
 import com.example.viewmodel.AttendanceViewModel
 
 @Composable
@@ -89,6 +96,7 @@ fun DashboardScreen(
     val allRecords by viewModel.repository.attendanceRecords.collectAsState()
     val today = viewModel.repository.getTodayDateString()
     var showInstallAppDialog by remember { mutableStateOf(false) }
+    var selectedAdminDashboardTab by remember { mutableIntStateOf(0) } // 0: Persentase Sholat, 1: Menu & Jadwal
 
     val studentRecords = allRecords.filter {
         it.nisn == currentUser.nisnOrNip && it.dateString == today
@@ -159,10 +167,10 @@ fun DashboardScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "Absensi Sholat Berjamaah",
+                                    text = "SIM SHOLAT",
                                     color = Color.White,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.ExtraBold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -212,8 +220,13 @@ fun DashboardScreen(
                                 overflow = TextOverflow.Ellipsis
                             )
                             val subInfo = when (currentUser.role) {
-                                Role.SISWA -> "NISN: ${currentUser.nisnOrNip} • ${currentUser.kelas} • ${currentUser.jurusan?.name}"
-                                Role.ADMIN_GURU -> "Guru: ${currentUser.nisnOrNip} • ${currentUser.kelas ?: currentUser.jurusan?.name ?: "Piket Masjid"}"
+                                Role.SISWA -> "NISN: ${currentUser.nisnOrNip} • ${currentUser.kelas} • ${currentUser.jurusan?.code}"
+                                Role.ADMIN_GURU -> {
+                                    val scopeLabel = currentUser.effectiveKelasFilter()
+                                        ?: currentUser.jurusan?.let { "Semua Kelas ${it.code}" }
+                                        ?: "Pilih Jurusan Pemantauan"
+                                    "${currentUser.effectiveJabatanLabel()} • $scopeLabel"
+                                }
                                 Role.ADMIN_PUSAT -> "Akses Pusat: Seluruh 7 Jurusan SMKN 1 Pangkep"
                             }
                             Text(
@@ -262,13 +275,13 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Akses Website & Pasang di HP",
+                        text = "Pasang Aplikasi di HP",
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
                         color = ScanGreenDark
                     )
                     Text(
-                        text = "Buka lewat browser atau scan barcode APK permanen",
+                        text = "Scan barcode Google Drive untuk unduh & pasang APK di HP",
                         fontSize = 11.sp,
                         color = ScanGreenDark.copy(alpha = 0.85f)
                     )
@@ -483,14 +496,91 @@ fun DashboardScreen(
             }
         }
 
-        // 3 WAKTU SHOLAT SCHEDULE & STATUS
-        Text(
-            text = "JADWAL SHOLAT BERJAMAAH HARI INI",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            color = BrownDark,
-            letterSpacing = 0.8.sp
-        )
+        // TABS KHUSUS GURU, KAPRODI & ADMIN PUSAT: PERSENTASE SHOLAT VS MENU & JADWAL
+        if (currentUser.role != Role.SISWA) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = CreamCardBg,
+                border = androidx.compose.foundation.BorderStroke(1.dp, CreamCardBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                TabRow(
+                    selectedTabIndex = selectedAdminDashboardTab,
+                    containerColor = Color.Transparent,
+                    indicator = { tabPositions ->
+                        TabRowDefaults.SecondaryIndicator(
+                            Modifier.tabIndicatorOffset(tabPositions[selectedAdminDashboardTab]),
+                            color = ScanGreenPrimary,
+                            height = 3.dp
+                        )
+                    }
+                ) {
+                    Tab(
+                        selected = selectedAdminDashboardTab == 0,
+                        onClick = { selectedAdminDashboardTab = 0 },
+                        modifier = Modifier.testTag("dashboard_tab_percentage"),
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.BarChart,
+                                    contentDescription = null,
+                                    tint = if (selectedAdminDashboardTab == 0) ScanGreenPrimary else Color(0xFF6B584E),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Persentase Sholat",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selectedAdminDashboardTab == 0) FontWeight.ExtraBold else FontWeight.Bold,
+                                    color = if (selectedAdminDashboardTab == 0) ScanGreenDark else Color(0xFF6B584E),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    )
+                    Tab(
+                        selected = selectedAdminDashboardTab == 1,
+                        onClick = { selectedAdminDashboardTab = 1 },
+                        modifier = Modifier.testTag("dashboard_tab_schedule_menu"),
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Mosque,
+                                    contentDescription = null,
+                                    tint = if (selectedAdminDashboardTab == 1) BrownPrimary else Color(0xFF6B584E),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Menu & Jadwal",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selectedAdminDashboardTab == 1) FontWeight.ExtraBold else FontWeight.Bold,
+                                    color = if (selectedAdminDashboardTab == 1) BrownDark else Color(0xFF6B584E),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        if (currentUser.role != Role.SISWA && selectedAdminDashboardTab == 0) {
+            TeacherPercentageTab(
+                viewModel = viewModel,
+                currentUser = currentUser
+            )
+        } else {
+            // 3 WAKTU SHOLAT SCHEDULE & STATUS
+            Text(
+                text = "JADWAL SHOLAT BERJAMAAH HARI INI",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = BrownDark,
+                letterSpacing = 0.8.sp
+            )
 
         // 1. Sholat Dhuha Card (Sunnah: Hadir / Tidak Hadir)
         Card(
@@ -892,6 +982,7 @@ fun DashboardScreen(
                     }
                 }
             }
+        }
         }
     }
 

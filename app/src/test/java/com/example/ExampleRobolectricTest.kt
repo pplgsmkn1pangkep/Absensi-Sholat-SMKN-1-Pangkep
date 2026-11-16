@@ -24,7 +24,7 @@ class ExampleRobolectricTest {
     fun `read string from context`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appName = context.getString(R.string.app_name)
-        assertEquals("Absensi Sholat SMKN 1", appName)
+        assertEquals("SIM SHOLAT", appName)
     }
 
     @Test
@@ -281,5 +281,88 @@ class ExampleRobolectricTest {
         // Admin Pusat and teachers still remain
         assertTrue(repository.allUsers.any { it.role == Role.ADMIN_PUSAT })
         assertTrue(repository.allUsers.any { it.role == Role.ADMIN_GURU })
+    }
+
+    @Test
+    fun `verify guru and kaprodi are strictly qualified by selected jurusan and class`() {
+        val viewModel = AttendanceViewModel()
+
+        // 1. Kaprodi PPLG sees ONLY PPLG students (all classes in PPLG)
+        assertTrue(viewModel.login("kaprodi.pplg", Role.ADMIN_GURU, "guru"))
+        val kaprodiStudents = viewModel.getQualifiedStudentsForCurrentUser()
+        assertTrue(kaprodiStudents.isNotEmpty())
+        assertTrue(kaprodiStudents.all { it.jurusan == com.example.model.Jurusan.PPLG })
+        assertTrue(kaprodiStudents.any { it.kelas == "XII PPLG 1" })
+        assertTrue(kaprodiStudents.any { it.kelas == "XII PPLG 2" })
+
+        // 2. Wali Kelas XII PPLG 1 sees ONLY XII PPLG 1 students
+        assertTrue(viewModel.login("wali.pplg", Role.ADMIN_GURU, "guru"))
+        val waliStudents = viewModel.getQualifiedStudentsForCurrentUser()
+        assertTrue(waliStudents.isNotEmpty())
+        assertTrue(waliStudents.all { it.kelas == "XII PPLG 1" })
+
+        // 3. Guru selects AKL qualification on login -> sees ONLY AKL students
+        assertTrue(
+            viewModel.login(
+                usernameOrNisn = "guru.agama",
+                role = Role.ADMIN_GURU,
+                passwordInput = "guru",
+                selectedJurusanOverride = com.example.model.Jurusan.AKL,
+                selectedKelasOverride = null
+            )
+        )
+        val aklStudents = viewModel.getQualifiedStudentsForCurrentUser()
+        assertTrue(aklStudents.isNotEmpty())
+        assertTrue(aklStudents.all { it.jurusan == com.example.model.Jurusan.AKL })
+    }
+
+    @Test
+    fun `verify prayer percentage stats calculate accurately for today and past days`() {
+        val viewModel = AttendanceViewModel()
+        assertTrue(viewModel.login("wali.pplg", Role.ADMIN_GURU, "guru"))
+
+        val allRecords = viewModel.repository.attendanceRecords.value
+        val today = viewModel.repository.getTodayDateString()
+        val yesterday = viewModel.repository.getDateStringDaysAgo(1)
+
+        val todayStats = viewModel.calculatePrayerStatsForDate(allRecords, today)
+        assertEquals(2, todayStats.totalStudents) // XII PPLG 1 has 2 seeded students
+        assertEquals(1, todayStats.dzuhurPresentCount)
+        assertEquals(50, todayStats.dzuhurPercentage)
+
+        val yesterdayStats = viewModel.calculatePrayerStatsForDate(allRecords, yesterday)
+        assertEquals(2, yesterdayStats.totalStudents)
+        assertEquals(2, yesterdayStats.dzuhurPresentCount)
+        assertEquals(100, yesterdayStats.dzuhurPercentage)
+        assertEquals(2, yesterdayStats.asharPresentCount)
+        assertEquals(100, yesterdayStats.asharPercentage)
+        assertEquals(100, yesterdayStats.goHomePercentage)
+    }
+
+    @Test
+    fun `verify downloadable student recap csv matches teacher jurusan qualification`() {
+        val viewModel = AttendanceViewModel()
+        assertTrue(viewModel.login("kaprodi.pplg", Role.ADMIN_GURU, "guru"))
+
+        val user = viewModel.currentUser.value!!
+        val allRecords = viewModel.repository.attendanceRecords.value
+        val today = viewModel.repository.getTodayDateString()
+        val stats = viewModel.calculatePrayerStatsForDate(allRecords, today)
+        val scopeLabel = com.example.util.ReportExporter.buildScopeLabel(user, viewModel.selectedJurusanFilter.value, viewModel.selectedKelasFilter.value)
+
+        val csv = com.example.util.ReportExporter.buildSingleDayCsvContent(
+            currentUser = user,
+            scopeLabel = scopeLabel,
+            readableDate = viewModel.repository.formatReadableDate(today),
+            stats = stats
+        )
+
+        // Must contain PPLG header and PPLG students only, never AKL/TJKT students
+        assertTrue(csv.contains("SIM SHOLAT - REKAP KEHADIRAN SHOLAT SISWA"))
+        assertTrue(csv.contains("Jurusan PPLG"))
+        assertTrue(csv.contains("Muhammad Fadhil"))
+        assertTrue(csv.contains("Siti Rahmawati"))
+        assertFalse(csv.contains("Nur Aisyah Putri"))
+        assertFalse(csv.contains("Andi Reski Pratama"))
     }
 }

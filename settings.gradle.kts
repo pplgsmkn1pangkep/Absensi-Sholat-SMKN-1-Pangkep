@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Absensi Sholat SMKN 1"
+rootProject.name = "SIM SHOLAT"
 
 include(":app")

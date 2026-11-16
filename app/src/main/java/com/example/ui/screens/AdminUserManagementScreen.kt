@@ -391,7 +391,7 @@ fun AdminUserManagementScreen(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    val subText = "NIP/ID: ${teacher.nisnOrNip} • ${teacher.kelas ?: teacher.jurusan?.name ?: "Piket Masjid"}"
+                                    val subText = "NIP/ID: ${teacher.nisnOrNip} • ${teacher.effectiveJabatanLabel()} • ${teacher.jurusan?.code ?: "Umum"}${teacher.effectiveKelasFilter()?.let { " ($it)" } ?: ""}"
                                     Text(
                                         text = subText,
                                         fontSize = 11.sp,
@@ -576,6 +576,7 @@ fun AdminUserManagementScreen(
         var inputSelectedJurusan by remember { mutableStateOf<Jurusan?>(Jurusan.PPLG) }
         var inputKelas by remember { mutableStateOf("XII PPLG 1") }
         var inputInitialPassword by remember { mutableStateOf("guru") }
+        val jabatanOptions = listOf("Guru Agama / Piket Masjid", "Wali Kelas", "Kaprodi", "Guru Pengajar")
 
         AlertDialog(
             onDismissRequest = { showAddTeacherDialog = false },
@@ -647,7 +648,6 @@ fun AdminUserManagementScreen(
 
                     // Jabatan / Peran
                     Text("Peran / Tugas:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BrownDark)
-                    val jabatanOptions = listOf("Guru Agama / Piket Masjid", "Wali Kelas", "Kaprodi", "Guru Pengajar")
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         jabatanOptions.forEachIndexed { idx, opt ->
                             Row(
@@ -696,12 +696,17 @@ fun AdminUserManagementScreen(
                         }
                     }
 
-                    if (inputJabatanType == 1) {
+                    if (inputJabatanType == 1 || inputJabatanType == 3) {
                         OutlinedTextField(
                             value = inputKelas,
                             onValueChange = { inputKelas = it },
-                            label = { Text("Kelas yang Diwalikan") },
-                            placeholder = { Text("Contoh: X PPLG 2") },
+                            label = {
+                                Text(
+                                    if (inputJabatanType == 1) "Kelas yang Diwalikan"
+                                    else "Kelas Spesifik (opsional, kosongkan = semua kelas jurusan)"
+                                )
+                            },
+                            placeholder = { Text("Contoh: XII ${inputSelectedJurusan?.code ?: "PPLG"} 1") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -719,11 +724,10 @@ fun AdminUserManagementScreen(
             confirmButton = {
                 Button(
                     onClick = {
+                        val jabatanLabel = jabatanOptions.getOrElse(inputJabatanType) { "Guru" }
                         val kelasValue = when (inputJabatanType) {
-                            0 -> "Piket Masjid SMKN 1"
-                            1 -> inputKelas
-                            2 -> "Kaprodi ${inputSelectedJurusan?.name ?: "Kejuruan"}"
-                            else -> "Guru Pengajar"
+                            1, 3 -> inputKelas.trim().ifEmpty { null }
+                            else -> null // Kaprodi & Guru Agama memantau seluruh kelas pada jurusan terpilih
                         }
                         val result = viewModel.addTeacher(
                             nipOrUsername = inputNip,
@@ -731,7 +735,8 @@ fun AdminUserManagementScreen(
                             gender = inputGender,
                             jurusan = inputSelectedJurusan,
                             kelas = kelasValue,
-                            initialPassword = inputInitialPassword
+                            initialPassword = inputInitialPassword,
+                            jabatan = jabatanLabel
                         )
                         result.onSuccess { teacher ->
                             Toast.makeText(context, "Berhasil! Akun Guru '${teacher.fullName}' telah ditambahkan.", Toast.LENGTH_LONG).show()

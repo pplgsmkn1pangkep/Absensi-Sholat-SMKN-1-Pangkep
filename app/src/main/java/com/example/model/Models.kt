@@ -57,10 +57,38 @@ data class UserProfile(
     val role: Role,
     val gender: Gender = Gender.LAKI_LAKI,
     val jurusan: Jurusan? = null,
-    val kelas: String? = null, // e.g. "XII PPLG 1"
+    val kelas: String? = null, // e.g. "XII PPLG 1" (null = semua kelas di jurusan)
     val avatarEmoji: String = "👤",
-    val password: String = "123456"
-)
+    val password: String = "123456",
+    val jabatan: String? = null // e.g. "Kaprodi", "Wali Kelas", "Guru Agama / Piket Masjid"
+) {
+    fun effectiveKelasFilter(): String? {
+        val raw = kelas?.trim().orEmpty()
+        if (raw.isEmpty()) return null
+        val lower = raw.lowercase()
+        if (
+            lower.startsWith("kaprodi") ||
+            lower.startsWith("piket") ||
+            lower.startsWith("guru") ||
+            lower.startsWith("semua")
+        ) {
+            return null
+        }
+        return raw
+    }
+
+    fun effectiveJabatanLabel(): String {
+        jabatan?.takeIf { it.isNotBlank() }?.let { return it }
+        val lowerName = fullName.lowercase()
+        val lowerKelas = kelas?.lowercase().orEmpty()
+        return when {
+            lowerName.contains("kaprodi") || lowerKelas.startsWith("kaprodi") -> "Kaprodi"
+            effectiveKelasFilter() != null -> "Wali Kelas"
+            lowerName.contains("agama") || lowerKelas.startsWith("piket") -> "Guru Agama / Piket"
+            else -> "Guru"
+        }
+    }
+}
 
 data class AttendanceRecord(
     val id: String,

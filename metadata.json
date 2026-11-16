@@ -1,6 +1,6 @@
 {
-  "name": "Absensi Sholat SMKN 1",
-  "description": "Aplikasi Absensi Sholat Berjamaah SMKN 1 Pangkajene dan Kepulauan dengan QR Dinamis, status Izin Pulang (Tiket Hijau) Sholat Ashar, dan pemantauan berbasis peran untuk 7 Jurusan.",
+  "name": "SIM SHOLAT",
+  "description": "SIM SHOLAT — Sistem Informasi Monitoring Sholat Berjamaah SMKN 1 Pangkajene dan Kepulauan dengan QR Dinamis, status Izin Pulang (Tiket Hijau), kualifikasi Guru/Kaprodi per jurusan, dan persentase kehadiran harian.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

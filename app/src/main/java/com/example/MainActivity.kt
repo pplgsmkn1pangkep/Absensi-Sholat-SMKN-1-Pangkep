@@ -160,10 +160,15 @@ fun MainApp(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = if (loggedInUser.role == Role.ADMIN_PUSAT) {
-                                    "Admin Pusat • Ganti Akun ▾"
-                                } else {
-                                    "${loggedInUser.role.title.split(" ").first()} • ${loggedInUser.nisnOrNip}"
+                                text = when (loggedInUser.role) {
+                                    Role.ADMIN_PUSAT -> "Admin Pusat • Ganti Akun ▾"
+                                    Role.ADMIN_GURU -> {
+                                        val scope = loggedInUser.effectiveKelasFilter()
+                                            ?: loggedInUser.jurusan?.code
+                                            ?: "Belum Pilih Jurusan"
+                                        "${loggedInUser.effectiveJabatanLabel()} • $scope"
+                                    }
+                                    Role.SISWA -> "Siswa • ${loggedInUser.nisnOrNip}"
                                 },
                                 color = AmberAccent,
                                 fontSize = 10.sp,
@@ -528,7 +533,11 @@ fun MainApp(
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(text = user.fullName, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = BrownDark)
-                                    Text(text = "Guru • ${user.kelas ?: "Piket Masjid"}", fontSize = 10.sp, color = Color.Gray)
+                                    Text(
+                                        text = "${user.effectiveJabatanLabel()} • ${user.effectiveKelasFilter() ?: user.jurusan?.code ?: "Umum"}",
+                                        fontSize = 10.sp,
+                                        color = Color.Gray
+                                    )
                                 }
                                 if (isSelected) {
                                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = BrownPrimary, modifier = Modifier.size(16.dp))
