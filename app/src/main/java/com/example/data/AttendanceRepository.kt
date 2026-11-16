@@ -24,8 +24,9 @@ import java.util.UUID
 
 class AttendanceRepository(
     private val firestore: FirebaseFirestore? = try {
-        FirebaseApp.getInstance()
-        FirebaseFirestore.getInstance()
+        val app = FirebaseApp.getInstance()
+        val dbId = app.applicationContext.getString(R.string.firestore_database_id)
+        FirebaseFirestore.getInstance(dbId)
     } catch (e: Throwable) {
         Log.w("AttendanceRepo", "Firestore not available or uninitialized, falling back to local storage: ${e.message}")
         null
