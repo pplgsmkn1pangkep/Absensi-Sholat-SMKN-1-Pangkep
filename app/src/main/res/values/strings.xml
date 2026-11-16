@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">SIM SHOLAT</string>
+    <string name="firestore_database_id">(default)</string>
 </resources>
