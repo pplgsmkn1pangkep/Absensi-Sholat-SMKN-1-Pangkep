@@ -11,14 +11,78 @@ enum class Gender {
     PEREMPUAN
 }
 
-enum class Jurusan(val code: String, val fullName: String, val displayLabel: String) {
-    PPLG("PPLG", "Pengembangan Perangkat Lunak dan Gim", "Pengembangan Perangkat Lunak dan Gim (PPLG)"),
-    AKL("AKL", "Akuntansi dan Keuangan Lembaga", "Akuntansi dan Keuangan Lembaga (AKL)"),
-    PM("PM", "Bisnis Daring dan Pemasaran", "Bisnis Daring dan Pemasaran (PM)"),
-    TJKT("TJKT", "Teknik Telekomunikasi dan Jaringan Komputer", "Teknik Telekomunikasi dan Jaringan Komputer (TJKT)"),
-    DKV("DKV", "Desain Komunikasi Visual", "Desain Komunikasi Visual (DKV)"),
-    APHP("APHP", "Agribisnis Pengolahan Hasil Pertanian", "Agribisnis Pengolahan Hasil Pertanian (APHP)"),
-    MPLB("MPLB", "Manajemen Perkantoran dan Layanan Bisnis", "Manajemen Perkantoran dan Layanan Bisnis (MPLB)")
+enum class Jurusan(
+    val code: String,
+    val fullName: String,
+    val displayLabel: String,
+    val officialClasses: List<String>
+) {
+    PPLG(
+        "PPLG",
+        "Pengembangan Perangkat Lunak dan Gim",
+        "Pengembangan Perangkat Lunak dan Gim (PPLG)",
+        listOf("X PPLG", "XI PPLG", "XII PPLG")
+    ),
+    AKL(
+        "AKL",
+        "Akuntansi dan Keuangan Lembaga",
+        "Akuntansi dan Keuangan Lembaga (AKL)",
+        listOf(
+            "X AKL 1", "X AKL 2", "X AKL 3",
+            "XI AKL 1", "XI AKL 2", "XI AKL 3",
+            "XII AKL 1", "XII AKL 2", "XII AKL 3"
+        )
+    ),
+    PM(
+        "PM",
+        "Bisnis Daring dan Pemasaran",
+        "Bisnis Daring dan Pemasaran (PM)",
+        listOf(
+            "X PM 1", "X PM 2", "X PM 3",
+            "XI PM 1", "XI PM 2", "XI PM 3",
+            "XII PM 1", "XII PM 2", "XII PM 3"
+        )
+    ),
+    TJKT(
+        "TJKT",
+        "Teknik Telekomunikasi dan Jaringan Komputer",
+        "Teknik Telekomunikasi dan Jaringan Komputer (TJKT)",
+        listOf(
+            "X TJKT 1", "X TJKT 2", "X TJKT 3",
+            "XI TJKT 1", "XI TJKT 2", "XI TJKT 3",
+            "XII TJKT 1", "XII TJKT 2", "XII TJKT 3"
+        )
+    ),
+    DKV(
+        "DKV",
+        "Desain Komunikasi Visual",
+        "Desain Komunikasi Visual (DKV)",
+        listOf(
+            "X DKV 1", "X DKV 2",
+            "XI DKV 1", "XI DKV 2",
+            "XII DKV 1", "XII DKV 2"
+        )
+    ),
+    APHP(
+        "APHP",
+        "Agribisnis Pengolahan Hasil Pertanian",
+        "Agribisnis Pengolahan Hasil Pertanian (APHP)",
+        listOf(
+            "X APHP 1", "X APHP 2",
+            "XI APHP 1", "XI APHP 2",
+            "XII APHP 1", "XII APHP 2"
+        )
+    ),
+    MPLB(
+        "MPLB",
+        "Manajemen Perkantoran dan Layanan Bisnis",
+        "Manajemen Perkantoran dan Layanan Bisnis (MPLB)",
+        listOf(
+            "X MPLB 1", "X MPLB 2", "X MPLB 3",
+            "XI MPLB 1", "XI MPLB 2", "XI MPLB 3",
+            "XII MPLB 1", "XII MPLB 2", "XII MPLB 3"
+        )
+    )
 }
 
 enum class PrayerType(

@@ -68,11 +68,11 @@ class AttendanceRepository(
         UserProfile(
             id = "guru-02",
             nisnOrNip = "wali.pplg",
-            fullName = "Drs. H. Ahmad Dahlan, M.Pd (Wali Kelas XII PPLG 1)",
+            fullName = "Drs. H. Ahmad Dahlan, M.Pd (Wali Kelas XII PPLG)",
             role = Role.ADMIN_GURU,
             gender = Gender.LAKI_LAKI,
             jurusan = Jurusan.PPLG,
-            kelas = "XII PPLG 1",
+            kelas = "XII PPLG",
             avatarEmoji = "👨‍🏫",
             password = "guru",
             jabatan = "Wali Kelas"
@@ -90,11 +90,11 @@ class AttendanceRepository(
         ),
 
         // 3. Siswa (All 7 Majors, including female students)
-        UserProfile("s-01", "0061234567", "Muhammad Fadhil", Role.SISWA, Gender.LAKI_LAKI, Jurusan.PPLG, "XII PPLG 1", "👨‍💻", "123456"),
+        UserProfile("s-01", "0061234567", "Muhammad Fadhil", Role.SISWA, Gender.LAKI_LAKI, Jurusan.PPLG, "XII PPLG", "👨‍💻", "123456"),
         UserProfile("s-02", "0067654321", "Nur Aisyah Putri", Role.SISWA, Gender.PEREMPUAN, Jurusan.AKL, "XI AKL 2", "🧕", "123456"),
         UserProfile("s-03", "0069988776", "Andi Reski Pratama", Role.SISWA, Gender.LAKI_LAKI, Jurusan.TJKT, "X TJKT 1", "🧑‍💻", "123456"),
-        UserProfile("s-04", "0061234568", "Ahmad Fauzan R", Role.SISWA, Gender.LAKI_LAKI, Jurusan.PPLG, "XII PPLG 1", "👦", "123456"),
-        UserProfile("s-05", "0061234569", "Siti Rahmawati", Role.SISWA, Gender.PEREMPUAN, Jurusan.PPLG, "XII PPLG 2", "🧕", "123456"),
+        UserProfile("s-04", "0061234568", "Ahmad Fauzan R", Role.SISWA, Gender.LAKI_LAKI, Jurusan.PPLG, "XII PPLG", "👦", "123456"),
+        UserProfile("s-05", "0061234569", "Siti Rahmawati", Role.SISWA, Gender.PEREMPUAN, Jurusan.PPLG, "XI PPLG", "🧕", "123456"),
         UserProfile("s-06", "0067654322", "Budi Darmawan", Role.SISWA, Gender.LAKI_LAKI, Jurusan.AKL, "XI AKL 1", "👦", "123456"),
         UserProfile("s-07", "0065544331", "Fitri Handayani", Role.SISWA, Gender.PEREMPUAN, Jurusan.PM, "XII PM 1", "👩", "123456"),
         UserProfile("s-08", "0069988777", "Muh. Ilham Jaya", Role.SISWA, Gender.LAKI_LAKI, Jurusan.TJKT, "XI TJKT 2", "👦", "123456"),
@@ -135,7 +135,7 @@ class AttendanceRepository(
                 nisn = "0061234567",
                 studentName = "Muhammad Fadhil",
                 jurusan = Jurusan.PPLG,
-                kelas = "XII PPLG 1",
+                kelas = "XII PPLG",
                 prayerType = PrayerType.DHUHA,
                 dateString = today,
                 timestampMillis = System.currentTimeMillis() - 8 * 3600 * 1000,
@@ -147,7 +147,7 @@ class AttendanceRepository(
                 nisn = "0061234567",
                 studentName = "Muhammad Fadhil",
                 jurusan = Jurusan.PPLG,
-                kelas = "XII PPLG 1",
+                kelas = "XII PPLG",
                 prayerType = PrayerType.DZUHUR,
                 dateString = today,
                 timestampMillis = System.currentTimeMillis() - 3 * 3600 * 1000,
@@ -159,7 +159,7 @@ class AttendanceRepository(
                 nisn = "0061234567",
                 studentName = "Muhammad Fadhil",
                 jurusan = Jurusan.PPLG,
-                kelas = "XII PPLG 1",
+                kelas = "XII PPLG",
                 prayerType = PrayerType.DHUHA,
                 dateString = yesterday,
                 timestampMillis = System.currentTimeMillis() - 28L * 3600 * 1000,
@@ -171,7 +171,7 @@ class AttendanceRepository(
                 nisn = "0061234567",
                 studentName = "Muhammad Fadhil",
                 jurusan = Jurusan.PPLG,
-                kelas = "XII PPLG 1",
+                kelas = "XII PPLG",
                 prayerType = PrayerType.DZUHUR,
                 dateString = yesterday,
                 timestampMillis = System.currentTimeMillis() - 27L * 3600 * 1000,
@@ -182,7 +182,7 @@ class AttendanceRepository(
                 nisn = "0061234567",
                 studentName = "Muhammad Fadhil",
                 jurusan = Jurusan.PPLG,
-                kelas = "XII PPLG 1",
+                kelas = "XII PPLG",
                 prayerType = PrayerType.ASHAR,
                 dateString = yesterday,
                 timestampMillis = System.currentTimeMillis() - 24L * 3600 * 1000,
@@ -193,7 +193,7 @@ class AttendanceRepository(
                 nisn = "0061234568",
                 studentName = "Ahmad Fauzan R",
                 jurusan = Jurusan.PPLG,
-                kelas = "XII PPLG 1",
+                kelas = "XII PPLG",
                 prayerType = PrayerType.DZUHUR,
                 dateString = yesterday,
                 timestampMillis = System.currentTimeMillis() - 27L * 3600 * 1000,
@@ -204,7 +204,7 @@ class AttendanceRepository(
                 nisn = "0061234568",
                 studentName = "Ahmad Fauzan R",
                 jurusan = Jurusan.PPLG,
-                kelas = "XII PPLG 1",
+                kelas = "XII PPLG",
                 prayerType = PrayerType.ASHAR,
                 dateString = yesterday,
                 timestampMillis = System.currentTimeMillis() - 24L * 3600 * 1000,
@@ -249,7 +249,7 @@ class AttendanceRepository(
                 nisn = "0061234567",
                 studentName = "Muhammad Fadhil",
                 jurusan = Jurusan.PPLG,
-                kelas = "XII PPLG 1",
+                kelas = "XII PPLG",
                 prayerType = PrayerType.DZUHUR,
                 dateString = twoDaysAgo,
                 timestampMillis = System.currentTimeMillis() - 51L * 3600 * 1000,
@@ -260,7 +260,7 @@ class AttendanceRepository(
                 nisn = "0061234568",
                 studentName = "Ahmad Fauzan R",
                 jurusan = Jurusan.PPLG,
-                kelas = "XII PPLG 1",
+                kelas = "XII PPLG",
                 prayerType = PrayerType.DHUHA,
                 dateString = twoDaysAgo,
                 timestampMillis = System.currentTimeMillis() - 55L * 3600 * 1000,
@@ -555,7 +555,7 @@ class AttendanceRepository(
             nisn = student.nisnOrNip,
             studentName = student.fullName,
             jurusan = student.jurusan ?: Jurusan.PPLG,
-            kelas = student.kelas ?: "X PPLG 1",
+            kelas = student.kelas ?: (student.jurusan?.officialClasses?.firstOrNull() ?: "X PPLG"),
             prayerType = prayerType,
             dateString = today,
             timestampMillis = System.currentTimeMillis(),
@@ -608,7 +608,7 @@ class AttendanceRepository(
                 nisn = student.nisnOrNip,
                 studentName = student.fullName,
                 jurusan = student.jurusan ?: Jurusan.PPLG,
-                kelas = student.kelas ?: "X PPLG 1",
+                kelas = student.kelas ?: (student.jurusan?.officialClasses?.firstOrNull() ?: "X PPLG"),
                 prayerType = PrayerType.DHUHA,
                 dateString = today,
                 timestampMillis = System.currentTimeMillis(),
@@ -866,15 +866,13 @@ class AttendanceRepository(
 
     fun getKnownClassesForJurusan(jurusan: Jurusan?): List<String> {
         if (jurusan == null) return emptyList()
-        val fromStudents = allStudents
+        val official = jurusan.officialClasses
+        val extraFromStudents = allStudents
             .filter { it.jurusan == jurusan }
-            .mapNotNull { it.kelas?.trim()?.takeIf { k -> k.isNotEmpty() } }
-        val defaults = listOf(
-            "X ${jurusan.code} 1",
-            "XI ${jurusan.code} 1",
-            "XII ${jurusan.code} 1"
-        )
-        return (fromStudents + defaults).distinct().sorted()
+            .mapNotNull { it.kelas?.trim()?.takeIf { k -> k.isNotEmpty() && k !in official } }
+            .distinct()
+            .sorted()
+        return official + extraFromStudents
     }
 
     fun resetPassword(targetUserIdOrNisn: String, newPassword: String): Boolean {

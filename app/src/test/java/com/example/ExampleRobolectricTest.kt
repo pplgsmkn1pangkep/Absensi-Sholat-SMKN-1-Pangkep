@@ -216,7 +216,7 @@ class ExampleRobolectricTest {
 
         val regResult = repository.registerStudent(
             fullName = "Anugrah Pratama",
-            kelas = "X PPLG 1",
+            kelas = "X PPLG",
             jurusan = com.example.model.Jurusan.PPLG,
             gender = com.example.model.Gender.LAKI_LAKI,
             nisn = "0069911223",
@@ -228,7 +228,7 @@ class ExampleRobolectricTest {
         org.junit.Assert.assertNotNull(newStudent)
         assertEquals("0069911223", newStudent?.nisnOrNip)
         assertEquals("Anugrah Pratama", newStudent?.fullName)
-        assertEquals("X PPLG 1", newStudent?.kelas)
+        assertEquals("X PPLG", newStudent?.kelas)
         assertEquals(com.example.model.Jurusan.PPLG, newStudent?.jurusan)
         assertEquals("password123", newStudent?.password)
         assertEquals(initialStudentCount + 1, repository.allStudents.size)
@@ -236,7 +236,7 @@ class ExampleRobolectricTest {
         // Duplicate rejection test
         val dupResult = repository.registerStudent(
             fullName = "Anugrah Kloning",
-            kelas = "X PPLG 2",
+            kelas = "XI PPLG",
             jurusan = com.example.model.Jurusan.PPLG,
             gender = com.example.model.Gender.LAKI_LAKI,
             nisn = "0069911223",
@@ -292,14 +292,14 @@ class ExampleRobolectricTest {
         val kaprodiStudents = viewModel.getQualifiedStudentsForCurrentUser()
         assertTrue(kaprodiStudents.isNotEmpty())
         assertTrue(kaprodiStudents.all { it.jurusan == com.example.model.Jurusan.PPLG })
-        assertTrue(kaprodiStudents.any { it.kelas == "XII PPLG 1" })
-        assertTrue(kaprodiStudents.any { it.kelas == "XII PPLG 2" })
+        assertTrue(kaprodiStudents.any { it.kelas == "XII PPLG" })
+        assertTrue(kaprodiStudents.any { it.kelas == "XI PPLG" })
 
-        // 2. Wali Kelas XII PPLG 1 sees ONLY XII PPLG 1 students
+        // 2. Wali Kelas XII PPLG sees ONLY XII PPLG students
         assertTrue(viewModel.login("wali.pplg", Role.ADMIN_GURU, "guru"))
         val waliStudents = viewModel.getQualifiedStudentsForCurrentUser()
         assertTrue(waliStudents.isNotEmpty())
-        assertTrue(waliStudents.all { it.kelas == "XII PPLG 1" })
+        assertTrue(waliStudents.all { it.kelas == "XII PPLG" })
 
         // 3. Guru selects AKL qualification on login -> sees ONLY AKL students
         assertTrue(
@@ -364,5 +364,36 @@ class ExampleRobolectricTest {
         assertTrue(csv.contains("Siti Rahmawati"))
         assertFalse(csv.contains("Nur Aisyah Putri"))
         assertFalse(csv.contains("Andi Reski Pratama"))
+    }
+
+    @Test
+    fun `verify official monitoring class list matches all 7 jurusan qualification`() {
+        val repository = AttendanceRepository()
+
+        assertEquals(listOf("X PPLG", "XI PPLG", "XII PPLG"), repository.getKnownClassesForJurusan(com.example.model.Jurusan.PPLG))
+        assertEquals(
+            listOf("X AKL 1", "X AKL 2", "X AKL 3", "XI AKL 1", "XI AKL 2", "XI AKL 3", "XII AKL 1", "XII AKL 2", "XII AKL 3"),
+            repository.getKnownClassesForJurusan(com.example.model.Jurusan.AKL)
+        )
+        assertEquals(
+            listOf("X PM 1", "X PM 2", "X PM 3", "XI PM 1", "XI PM 2", "XI PM 3", "XII PM 1", "XII PM 2", "XII PM 3"),
+            repository.getKnownClassesForJurusan(com.example.model.Jurusan.PM)
+        )
+        assertEquals(
+            listOf("X MPLB 1", "X MPLB 2", "X MPLB 3", "XI MPLB 1", "XI MPLB 2", "XI MPLB 3", "XII MPLB 1", "XII MPLB 2", "XII MPLB 3"),
+            repository.getKnownClassesForJurusan(com.example.model.Jurusan.MPLB)
+        )
+        assertEquals(
+            listOf("X DKV 1", "X DKV 2", "XI DKV 1", "XI DKV 2", "XII DKV 1", "XII DKV 2"),
+            repository.getKnownClassesForJurusan(com.example.model.Jurusan.DKV)
+        )
+        assertEquals(
+            listOf("X TJKT 1", "X TJKT 2", "X TJKT 3", "XI TJKT 1", "XI TJKT 2", "XI TJKT 3", "XII TJKT 1", "XII TJKT 2", "XII TJKT 3"),
+            repository.getKnownClassesForJurusan(com.example.model.Jurusan.TJKT)
+        )
+        assertEquals(
+            listOf("X APHP 1", "X APHP 2", "XI APHP 1", "XI APHP 2", "XII APHP 1", "XII APHP 2"),
+            repository.getKnownClassesForJurusan(com.example.model.Jurusan.APHP)
+        )
     }
 }

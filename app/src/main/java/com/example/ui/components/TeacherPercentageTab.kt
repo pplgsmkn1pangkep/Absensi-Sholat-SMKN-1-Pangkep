@@ -250,11 +250,7 @@ fun TeacherPercentageTab(
                     !isEditingQualification
                 ) {
                     val availableClasses = remember(currentUser.jurusan, allUsers) {
-                        viewModel.repository.allStudents
-                            .filter { it.jurusan == currentUser.jurusan }
-                            .mapNotNull { it.kelas }
-                            .distinct()
-                            .sorted()
+                        viewModel.repository.getKnownClassesForJurusan(currentUser.jurusan)
                     }
                     if (availableClasses.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -288,7 +284,7 @@ fun TeacherPercentageTab(
                     }
                 }
 
-                // Admin Pusat can filter across 7 majors
+                // Admin Pusat can filter across 7 majors and their classes
                 if (currentUser.role == Role.ADMIN_PUSAT) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(
@@ -316,6 +312,39 @@ fun TeacherPercentageTab(
                                     selectedLabelColor = Color.White
                                 )
                             )
+                        }
+                    }
+                    if (selectedJurusanFilter != null) {
+                        val adminClasses = remember(selectedJurusanFilter, allUsers) {
+                            viewModel.repository.getKnownClassesForJurusan(selectedJurusanFilter)
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            FilterChip(
+                                selected = selectedKelasFilter == null,
+                                onClick = { viewModel.setKelasFilter(null) },
+                                label = { Text("Semua Kelas ${selectedJurusanFilter?.code}", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = ScanGreenPrimary,
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                            adminClasses.forEach { kelasName ->
+                                FilterChip(
+                                    selected = selectedKelasFilter.equals(kelasName, ignoreCase = true),
+                                    onClick = { viewModel.setKelasFilter(kelasName) },
+                                    label = { Text(kelasName, fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = ScanGreenPrimary,
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
                         }
                     }
                 }
@@ -399,7 +428,7 @@ fun TeacherPercentageTab(
                             value = draftKelas,
                             onValueChange = { draftKelas = it },
                             label = { Text("Atau ketik kelas spesifik (opsional)") },
-                            placeholder = { Text("Contoh: XII ${draftJurusan.code} 1") },
+                            placeholder = { Text("Contoh: ${draftJurusan.officialClasses.firstOrNull() ?: "X PPLG"}") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp),

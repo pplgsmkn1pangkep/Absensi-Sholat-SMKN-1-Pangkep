@@ -74,6 +74,7 @@ fun MonitoringScreen(
     val currentUser = currentUserState ?: return
     val allRecords by viewModel.repository.attendanceRecords.collectAsState()
     val selectedJurusan by viewModel.selectedJurusanFilter.collectAsState()
+    val selectedKelas by viewModel.selectedKelasFilter.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
 
     val studentSummaries = viewModel.getFilteredStudents(allRecords)
@@ -167,7 +168,9 @@ fun MonitoringScreen(
             IconButton(
                 onClick = {
                     val todayFile = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-                    val filterLabel = selectedJurusan?.code ?: "SemuaJurusan"
+                    val activeJurusan = if (currentUser.role == Role.ADMIN_GURU) currentUser.jurusan ?: selectedJurusan else selectedJurusan
+                    val activeKelas = currentUser.effectiveKelasFilter() ?: selectedKelas
+                    val filterLabel = (activeKelas ?: activeJurusan?.code ?: "SemuaJurusan").replace(" ", "_")
                     exportCsvLauncher.launch("Rekap_Sholat_${filterLabel}_$todayFile.csv")
                 },
                 modifier = Modifier.testTag("export_report_button")
@@ -201,7 +204,15 @@ fun MonitoringScreen(
                 Spacer(modifier = Modifier.width(8.dp))
                 val scopeNotice = when (currentUser.role) {
                     Role.SISWA -> "Catatan absensi pribadi siswa."
-                    Role.ADMIN_GURU -> "Akses kelas/jurusan: ${currentUser.kelas ?: currentUser.jurusan?.name ?: "Piket Masjid Darul Ulum"}."
+                    Role.ADMIN_GURU -> {
+                        val j = currentUser.jurusan ?: selectedJurusan
+                        val k = currentUser.effectiveKelasFilter() ?: selectedKelas
+                        if (j == null) {
+                            "Akses guru belum terkualifikasi jurusan: pilih jurusan atau kelas di bawah."
+                        } else {
+                            "Kualifikasi ${currentUser.effectiveJabatanLabel()}: Jurusan ${j.code} • ${k ?: "Semua Kelas ${j.code}"}."
+                        }
+                    }
                     Role.ADMIN_PUSAT -> "Akses Penuh: Seluruh 7 jurusan di SMKN 1 Pangkajene dan Kepulauan."
                 }
                 Text(
@@ -260,6 +271,42 @@ fun MonitoringScreen(
                             selectedLabelColor = Color.White
                         )
                     )
+                }
+            }
+        }
+
+        // Class Filter Chips for selected Jurusan (Kaprodi / Admin Pusat / Guru tanpa kunci kelas)
+        val activeFilterJurusan = if (currentUser.role == Role.ADMIN_GURU) currentUser.jurusan ?: selectedJurusan else selectedJurusan
+        if (activeFilterJurusan != null && (currentUser.role == Role.ADMIN_PUSAT || currentUser.effectiveKelasFilter() == null)) {
+            val classOptions = viewModel.repository.getKnownClassesForJurusan(activeFilterJurusan)
+            if (classOptions.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilterChip(
+                        selected = selectedKelas == null,
+                        onClick = { viewModel.setKelasFilter(null) },
+                        label = { Text("Semua Kelas ${activeFilterJurusan.code}", fontSize = 11.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = com.example.ui.theme.ScanGreenPrimary,
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                    classOptions.forEach { cls ->
+                        FilterChip(
+                            selected = selectedKelas.equals(cls, ignoreCase = true),
+                            onClick = { viewModel.setKelasFilter(cls) },
+                            label = { Text(cls, fontSize = 11.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = com.example.ui.theme.ScanGreenPrimary,
+                                selectedLabelColor = Color.White
+                            )
+                        )
+                    }
                 }
             }
         }

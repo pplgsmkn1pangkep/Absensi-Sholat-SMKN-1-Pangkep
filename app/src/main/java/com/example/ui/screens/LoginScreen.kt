@@ -464,27 +464,7 @@ fun LoginScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // 2. Kelas
-                    OutlinedTextField(
-                        value = regKelas,
-                        onValueChange = { regKelas = it },
-                        label = { Text("Kelas") },
-                        placeholder = { Text("Contoh: X PPLG 1 / XI AKL 2 / XII PM 1") },
-                        leadingIcon = { Icon(Icons.Default.School, contentDescription = null, tint = ScanGreenPrimary) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("reg_student_class_field"),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = ScanGreenPrimary,
-                            focusedLabelColor = ScanGreenPrimary
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // 3. Jurusan (Dropdown dengan 7 Pilihan Lengkap)
+                    // 2. Jurusan (Dropdown dengan 7 Pilihan Lengkap)
                     ExposedDropdownMenuBox(
                         expanded = isJurusanDropdownExpanded,
                         onExpandedChange = { isJurusanDropdownExpanded = !isJurusanDropdownExpanded },
@@ -520,10 +500,54 @@ fun LoginScreen(
                                     },
                                     onClick = {
                                         regSelectedJurusan = jur
+                                        if (regKelas !in jur.officialClasses) {
+                                            regKelas = jur.officialClasses.firstOrNull() ?: ""
+                                        }
                                         isJurusanDropdownExpanded = false
                                     }
                                 )
                             }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 3. Kelas (pilihan resmi sesuai jurusan + dapat diketik manual)
+                    OutlinedTextField(
+                        value = regKelas,
+                        onValueChange = { regKelas = it },
+                        label = { Text("Kelas") },
+                        placeholder = { Text("Contoh: ${regSelectedJurusan.officialClasses.firstOrNull() ?: "X PPLG"}") },
+                        leadingIcon = { Icon(Icons.Default.School, contentDescription = null, tint = ScanGreenPrimary) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("reg_student_class_field"),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = ScanGreenPrimary,
+                            focusedLabelColor = ScanGreenPrimary
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        regSelectedJurusan.officialClasses.forEach { cls ->
+                            FilterChip(
+                                selected = regKelas.equals(cls, ignoreCase = true),
+                                onClick = { regKelas = cls },
+                                label = { Text(cls, fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = ScanGreenPrimary,
+                                    selectedLabelColor = Color.White
+                                )
+                            )
                         }
                     }
 

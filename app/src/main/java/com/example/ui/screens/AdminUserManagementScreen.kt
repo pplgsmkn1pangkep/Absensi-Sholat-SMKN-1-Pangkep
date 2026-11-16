@@ -574,7 +574,7 @@ fun AdminUserManagementScreen(
         var inputGender by remember { mutableStateOf(Gender.LAKI_LAKI) }
         var inputJabatanType by remember { mutableIntStateOf(0) } // 0: Guru Agama/Piket, 1: Wali Kelas, 2: Kaprodi, 3: Guru Umum
         var inputSelectedJurusan by remember { mutableStateOf<Jurusan?>(Jurusan.PPLG) }
-        var inputKelas by remember { mutableStateOf("XII PPLG 1") }
+        var inputKelas by remember { mutableStateOf("XII PPLG") }
         var inputInitialPassword by remember { mutableStateOf("guru") }
         val jabatanOptions = listOf("Guru Agama / Piket Masjid", "Wali Kelas", "Kaprodi", "Guru Pengajar")
 
@@ -686,7 +686,12 @@ fun AdminUserManagementScreen(
                         Jurusan.entries.forEach { jur ->
                             FilterChip(
                                 selected = inputSelectedJurusan == jur,
-                                onClick = { inputSelectedJurusan = jur },
+                                onClick = {
+                                    inputSelectedJurusan = jur
+                                    if (inputKelas !in jur.officialClasses) {
+                                        inputKelas = jur.officialClasses.firstOrNull() ?: ""
+                                    }
+                                },
                                 label = { Text(jur.code) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = BrownPrimary,
@@ -697,6 +702,41 @@ fun AdminUserManagementScreen(
                     }
 
                     if (inputJabatanType == 1 || inputJabatanType == 3) {
+                        val kelasOptions = remember(inputSelectedJurusan) {
+                            viewModel.repository.getKnownClassesForJurusan(inputSelectedJurusan)
+                        }
+                        if (kelasOptions.isNotEmpty()) {
+                            Text("Pilih Kelas Resmi (${inputSelectedJurusan?.code}):", fontSize = 11.sp, color = BrownMedium)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (inputJabatanType == 3) {
+                                    FilterChip(
+                                        selected = inputKelas.isBlank(),
+                                        onClick = { inputKelas = "" },
+                                        label = { Text("Semua Kelas", fontSize = 11.sp) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = BrownPrimary,
+                                            selectedLabelColor = Color.White
+                                        )
+                                    )
+                                }
+                                kelasOptions.forEach { cls ->
+                                    FilterChip(
+                                        selected = inputKelas.equals(cls, ignoreCase = true),
+                                        onClick = { inputKelas = cls },
+                                        label = { Text(cls, fontSize = 11.sp) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = ScanGreenPrimary,
+                                            selectedLabelColor = Color.White
+                                        )
+                                    )
+                                }
+                            }
+                        }
                         OutlinedTextField(
                             value = inputKelas,
                             onValueChange = { inputKelas = it },
@@ -706,7 +746,7 @@ fun AdminUserManagementScreen(
                                     else "Kelas Spesifik (opsional, kosongkan = semua kelas jurusan)"
                                 )
                             },
-                            placeholder = { Text("Contoh: XII ${inputSelectedJurusan?.code ?: "PPLG"} 1") },
+                            placeholder = { Text("Contoh: ${inputSelectedJurusan?.officialClasses?.firstOrNull() ?: "X PPLG"}") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
