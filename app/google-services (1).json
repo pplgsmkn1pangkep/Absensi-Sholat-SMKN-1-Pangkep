@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "556344409557",
+    "project_id": "ruang-sholat-smkn-1-pangkep",
+    "storage_bucket": "ruang-sholat-smkn-1-pangkep.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:556344409557:android:d35a48ab389e7d0977115c",
+        "android_client_info": {
+          "package_name": "com.aistudio.absensisholat.smknpk"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDaJosseKvZ15Bx6krWc5ZQeTBUyc4P38s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
