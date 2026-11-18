@@ -21,15 +21,14 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
-
-private val firestore: FirebaseFirestore? = try {
-    FirebaseFirestore.getInstance()
-} catch (e: Throwable) {
-    Log.w("AttendanceRepo", "Firestore not available or uninitialized, falling back to local storage: ${e.message}")
-    null
-}) {
-
-    // Predefined accounts categorized into Admin Pusat, Admin Guru, and Siswa (with explicit Gender)
+class AttendanceRepository(
+    private val firestore: FirebaseFirestore? = try {
+        FirebaseFirestore.getInstance()
+    } catch (e: Throwable) {
+        Log.w("AttendanceRepo", "Firestore not available or uninitialized, falling back to local storage: ${e.message}")
+        null
+    }
+) {    // Predefined accounts categorized into Admin Pusat, Admin Guru, and Siswa (with explicit Gender)
     private val initialUsers: List<UserProfile> = listOf(
         // 1. Admin Pusat
         UserProfile(
