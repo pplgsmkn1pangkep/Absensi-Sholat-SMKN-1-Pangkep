@@ -22,19 +22,12 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-class AttendanceRepository(
-    private val firestore: FirebaseFirestore? = try {
-        val app = FirebaseApp.getInstance()
-        val dbId = app.applicationContext.getString(R.string.firestore_database_id)
-        if (dbId.isBlank() || dbId == "(default)") {
-            FirebaseFirestore.getInstance()
-        } else {
-            FirebaseFirestore.getInstance(dbId)
-        }
-    } catch (e: Throwable) {
-        Log.w("AttendanceRepo", "Firestore not available or uninitialized, falling back to local storage: ${e.message}")
-        null
-    }) {
+private val firestore: FirebaseFirestore? = try {
+    FirebaseFirestore.getInstance()
+} catch (e: Throwable) {
+    Log.w("AttendanceRepo", "Firestore not available or uninitialized, falling back to local storage: ${e.message}")
+    null
+}) {
 
     // Predefined accounts categorized into Admin Pusat, Admin Guru, and Siswa (with explicit Gender)
     private val initialUsers: List<UserProfile> = listOf(
