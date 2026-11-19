@@ -205,12 +205,21 @@ fun MonitoringScreen(
                 val scopeNotice = when (currentUser.role) {
                     Role.SISWA -> "Catatan absensi pribadi siswa."
                     Role.ADMIN_GURU -> {
-                        val j = currentUser.jurusan ?: selectedJurusan
-                        val k = currentUser.effectiveKelasFilter() ?: selectedKelas
-                        if (j == null) {
-                            "Akses guru belum terkualifikasi jurusan: pilih jurusan atau kelas di bawah."
-                        } else {
-                            "Kualifikasi ${currentUser.effectiveJabatanLabel()}: Jurusan ${j.code} • ${k ?: "Semua Kelas ${j.code}"}."
+                        val j = currentUser.jurusan ?: if (currentUser.isRestrictedToAssignedScope()) null else selectedJurusan
+                        val k = currentUser.effectiveKelasFilter() ?: if (currentUser.isWaliKelas()) null else selectedKelas
+                        when {
+                            currentUser.isWaliKelas() && k != null ->
+                                "Akses Terkunci (Wali Kelas): Hanya menampilkan aktivitas kelas $k (${j?.code ?: "-"})."
+                            currentUser.isWaliKelas() ->
+                                "Wali Kelas belum memilih kelas binaan. Kembali ke Dashboard untuk memilih kelas Anda."
+                            currentUser.isKaprodi() && j != null && k != null ->
+                                "Akses Terkunci (Kaprodi): Hanya menampilkan aktivitas kelas $k (Jurusan ${j.code})."
+                            currentUser.isKaprodi() && j != null ->
+                                "Akses Terkunci (Kaprodi): Hanya menampilkan aktivitas Jurusan ${j.code}."
+                            j == null ->
+                                "Akses guru belum terkualifikasi jurusan: pilih jurusan atau kelas di bawah."
+                            else ->
+                                "Kualifikasi ${currentUser.effectiveJabatanLabel()}: Jurusan ${j.code} • ${k ?: "Semua Kelas ${j.code}"}."
                         }
                     }
                     Role.ADMIN_PUSAT -> "Akses Penuh: Seluruh 7 jurusan di SMKN 1 Pangkajene dan Kepulauan."
@@ -244,8 +253,8 @@ fun MonitoringScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Jurusan Filter Chips
-        if (currentUser.role == Role.ADMIN_PUSAT || (currentUser.role == Role.ADMIN_GURU && currentUser.jurusan == null)) {
+        // Jurusan Filter Chips (Admin Pusat, Guru BK & Guru Agama tanpa kunci jurusan — BUKAN Wali Kelas/Kaprodi)
+        if (currentUser.role == Role.ADMIN_PUSAT || (currentUser.role == Role.ADMIN_GURU && currentUser.jurusan == null && !currentUser.isRestrictedToAssignedScope())) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -275,9 +284,15 @@ fun MonitoringScreen(
             }
         }
 
-        // Class Filter Chips for selected Jurusan (Kaprodi / Admin Pusat / Guru tanpa kunci kelas)
-        val activeFilterJurusan = if (currentUser.role == Role.ADMIN_GURU) currentUser.jurusan ?: selectedJurusan else selectedJurusan
-        if (activeFilterJurusan != null && (currentUser.role == Role.ADMIN_PUSAT || currentUser.effectiveKelasFilter() == null)) {
+        // Class Filter Chips (Admin Pusat, Kaprodi tanpa kunci 1 kelas khusus dalam jurusannya sendiri, atau Guru BK/Agama — BUKAN Wali Kelas)
+        val activeFilterJurusan = if (currentUser.role == Role.ADMIN_GURU) {
+            currentUser.jurusan ?: if (currentUser.isRestrictedToAssignedScope()) null else selectedJurusan
+        } else {
+            selectedJurusan
+        }
+        if (activeFilterJurusan != null &&
+            (currentUser.role == Role.ADMIN_PUSAT || (currentUser.effectiveKelasFilter() == null && !currentUser.isWaliKelas()))
+        ) {
             val classOptions = viewModel.repository.getKnownClassesForJurusan(activeFilterJurusan)
             if (classOptions.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(6.dp))

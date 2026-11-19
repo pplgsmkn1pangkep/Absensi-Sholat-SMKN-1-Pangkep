@@ -287,19 +287,32 @@ class ExampleRobolectricTest {
     fun `verify guru and kaprodi are strictly qualified by selected jurusan and class`() {
         val viewModel = AttendanceViewModel()
 
-        // 1. Kaprodi PPLG sees ONLY PPLG students (all classes in PPLG)
+        // 1. Kaprodi PPLG sees ONLY PPLG students (all classes in PPLG) and cannot switch to another jurusan
         assertTrue(viewModel.login("kaprodi.pplg", Role.ADMIN_GURU, "guru"))
         val kaprodiStudents = viewModel.getQualifiedStudentsForCurrentUser()
         assertTrue(kaprodiStudents.isNotEmpty())
         assertTrue(kaprodiStudents.all { it.jurusan == com.example.model.Jurusan.PPLG })
         assertTrue(kaprodiStudents.any { it.kelas == "XII PPLG" })
         assertTrue(kaprodiStudents.any { it.kelas == "XI PPLG" })
+        // Attempt to switch Kaprodi to AKL must be blocked
+        viewModel.updateTeacherQualification(com.example.model.Jurusan.AKL, "X AKL 1")
+        viewModel.setJurusanFilter(com.example.model.Jurusan.AKL)
+        val kaprodiAfterAttempt = viewModel.getQualifiedStudentsForCurrentUser()
+        assertTrue(kaprodiAfterAttempt.isNotEmpty())
+        assertTrue(kaprodiAfterAttempt.all { it.jurusan == com.example.model.Jurusan.PPLG })
 
-        // 2. Wali Kelas XII PPLG sees ONLY XII PPLG students
+        // 2. Wali Kelas XII PPLG sees ONLY XII PPLG students and cannot switch to another class or jurusan
         assertTrue(viewModel.login("wali.pplg", Role.ADMIN_GURU, "guru"))
         val waliStudents = viewModel.getQualifiedStudentsForCurrentUser()
         assertTrue(waliStudents.isNotEmpty())
         assertTrue(waliStudents.all { it.kelas == "XII PPLG" })
+        // Attempt to switch Wali Kelas to XI PPLG or AKL must be blocked
+        viewModel.updateTeacherQualification(com.example.model.Jurusan.PPLG, "XI PPLG")
+        viewModel.setKelasFilter("XI PPLG")
+        viewModel.setJurusanFilter(com.example.model.Jurusan.AKL)
+        val waliAfterAttempt = viewModel.getQualifiedStudentsForCurrentUser()
+        assertTrue(waliAfterAttempt.isNotEmpty())
+        assertTrue(waliAfterAttempt.all { it.kelas == "XII PPLG" })
 
         // 3. Guru selects AKL qualification on login -> sees ONLY AKL students
         assertTrue(
@@ -395,5 +408,15 @@ class ExampleRobolectricTest {
             listOf("X APHP 1", "X APHP 2", "XI APHP 1", "XI APHP 2", "XII APHP 1", "XII APHP 2"),
             repository.getKnownClassesForJurusan(com.example.model.Jurusan.APHP)
         )
+    }
+
+    @Test
+    fun `verify AttendanceRepository initializes cleanly when FirebaseApp is initialized`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val app = com.example.data.FirebaseConfig.ensureInitialized(context)
+        assertEquals("ruang-sholat-smkn-1-pangkep", app.options.projectId)
+        val repository = AttendanceRepository()
+        assertTrue(repository.allUsers.isNotEmpty())
+        assertTrue(repository.getKnownClassesForJurusan(com.example.model.Jurusan.PPLG).isNotEmpty())
     }
 }

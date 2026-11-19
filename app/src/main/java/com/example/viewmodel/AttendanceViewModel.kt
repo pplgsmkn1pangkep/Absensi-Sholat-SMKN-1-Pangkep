@@ -57,22 +57,97 @@ class AttendanceViewModel(
     private val _scanFeedback = MutableStateFlow<String?>(null)
     val scanFeedback: StateFlow<String?> = _scanFeedback.asStateFlow()
 
+    // Loading state for one-shot Firestore refresh actions
+    val isRefreshingData: StateFlow<Boolean> = repository.isLoadingRemote
+
+    // Guard so 7-day recap (.get()) is only triggered once per active scope when the recap tab/screen is opened
+    private var loadedSevenDayRecapScopeKey: String? = null
+
     fun login(
         usernameOrNisn: String,
         role: Role,
         passwordInput: String? = null,
         selectedJurusanOverride: Jurusan? = null,
-        selectedKelasOverride: String? = null
+        selectedKelasOverride: String? = null,
+        onResult: ((Boolean, String) -> Unit)? = null
     ): Boolean {
         val cleanInput = usernameOrNisn.trim()
         val cleanPass = passwordInput?.trim()
-        if (cleanInput.isEmpty()) return false
+        if (cleanInput.isEmpty()) {
+            onResult?.invoke(false, "Silakan isi NISN/Username dan Kata Sandi.")
+            return false
+        }
 
-        val found = repository.allUsers.find {
+        val localMatch = repository.allUsers.find {
             it.role == role &&
-            (it.nisnOrNip.equals(cleanInput, ignoreCase = true) || it.id.equals(cleanInput, ignoreCase = true)) &&
-            (cleanPass == null || it.password == cleanPass)
-        } ?: return false
+                (it.nisnOrNip.equals(cleanInput, ignoreCase = true) || it.id.equals(cleanInput, ignoreCase = true)) &&
+                (cleanPass == null || it.password == cleanPass)
+        }
+
+        if (localMatch != null) {
+            activateUserSession(
+                found = localMatch,
+                selectedJurusanOverride = selectedJurusanOverride,
+                selectedKelasOverride = selectedKelasOverride
+            )
+            onResult?.invoke(true, "Berhasil masuk! Selamat datang, ${localMatch.fullName}.")
+            // Verify single user document via .whereEqualTo("nisnOrNip", username).limit(1).get()
+            // so profile updates/password resets from server stay accurate with only 1 read.
+            repository.fetchUserByNisnOrNip(cleanInput) { remoteUser ->
+                if (remoteUser != null && remoteUser.role == role) {
+                    if (cleanPass != null && remoteUser.password != cleanPass) {
+                        // Password was changed remotely by Admin Pusat
+                        logout()
+                    } else if (_currentUser.value?.id == remoteUser.id) {
+                        val syncedUser = if (remoteUser.role == Role.ADMIN_GURU && selectedJurusanOverride != null) {
+                            remoteUser.copy(
+                                jurusan = selectedJurusanOverride,
+                                kelas = selectedKelasOverride?.trim()?.ifEmpty { null }
+                            )
+                        } else {
+                            remoteUser
+                        }
+                        _currentUser.value = syncedUser
+                    }
+                }
+            }
+            return true
+        }
+
+        // Not yet in local cache (e.g., 1,500 remote students/teachers):
+        // Query ONLY 1 document via .whereEqualTo("nisnOrNip", cleanInput).limit(1).get()
+        repository.fetchUserByNisnOrNip(cleanInput) { remoteUser ->
+            when {
+                remoteUser == null -> {
+                    onResult?.invoke(false, "Gagal masuk. Akun tidak ditemukan, periksa kembali NISN/Username Anda.")
+                }
+                remoteUser.role != role -> {
+                    onResult?.invoke(false, "Gagal masuk. Akun terdaftar bukan pada jenis akun yang dipilih.")
+                }
+                cleanPass != null && remoteUser.password != cleanPass -> {
+                    onResult?.invoke(false, "Gagal masuk. Kata sandi tidak sesuai, periksa kembali sandi Anda.")
+                }
+                else -> {
+                    activateUserSession(
+                        found = remoteUser,
+                        selectedJurusanOverride = selectedJurusanOverride,
+                        selectedKelasOverride = selectedKelasOverride
+                    )
+                    onResult?.invoke(true, "Berhasil masuk! Selamat datang, ${remoteUser.fullName}.")
+                }
+            }
+        }
+        return false
+    }
+
+    private fun activateUserSession(
+        found: UserProfile,
+        selectedJurusanOverride: Jurusan? = null,
+        selectedKelasOverride: String? = null
+    ) {
+        // Clear any previous session's listeners before starting new role-scoped sync
+        repository.clearListeners()
+        loadedSevenDayRecapScopeKey = null
 
         val activeUser = if (found.role == Role.ADMIN_GURU && selectedJurusanOverride != null) {
             repository.updateTeacherQualification(
@@ -98,18 +173,176 @@ class AttendanceViewModel(
             _selectedJurusanFilter.value = null
             _selectedKelasFilter.value = null
         }
-        return true
+
+        configureFirestoreForRole(activeUser)
+    }
+
+    /**
+     * Mengatur strategi koneksi Firestore hemat kuota sesuai peran pengguna:
+     * - SISWA: addSnapshotListener khusus dokumen miliknya hari ini + 1 dokumen QR aktif.
+     * - ADMIN_GURU / ADMIN_PUSAT: .get() sekali ambil untuk users terfilter & absensi hari ini + 1 dokumen QR aktif.
+     */
+    private fun configureFirestoreForRole(user: UserProfile) {
+        // 4. Dengarkan HANYA 1 dokumen token QR sesi sholat yang sedang aktif
+        repository.observeActiveQrSession(repository.getCurrentActivePrayerSession())
+
+        when (user.role) {
+            Role.SISWA -> {
+                // 2A. Realtime listener terbatas HANYA untuk studentId milik siswa & tanggal hari ini
+                repository.startStudentAttendanceListener(user)
+            }
+            Role.ADMIN_GURU -> {
+                val targetJurusan = user.jurusan
+                    ?: if (user.isRestrictedToAssignedScope()) null else _selectedJurusanFilter.value
+                val targetKelas = user.effectiveKelasFilter()
+                    ?: if (user.isWaliKelas()) null else _selectedKelasFilter.value
+                // Hemat kuota Spark Plan: tunda .get() sampai guru (Wali Kelas/Kaprodi/Guru BK/Guru Agama)
+                // memiliki jurusan/kelas target agar tidak mengunduh data seluruh 1.500 siswa sekolah sekaligus.
+                if (targetJurusan == null || (user.isWaliKelas() && targetKelas == null)) {
+                    return
+                }
+                // 1B & 2B. Sekali ambil (.get()) khusus jurusan/kelas kualifikasi guru
+                repository.fetchUsersOnce(
+                    jurusan = targetJurusan,
+                    kelas = targetKelas,
+                    includeAllRoles = false,
+                    forceRefresh = false
+                )
+                repository.fetchTodayAttendanceOnce(
+                    jurusan = targetJurusan,
+                    kelas = targetKelas,
+                    forceRefresh = false
+                )
+                repository.fetchActivePeriodsOnce(forceRefresh = false)
+            }
+            Role.ADMIN_PUSAT -> {
+                val targetJurusan = _selectedJurusanFilter.value
+                val targetKelas = _selectedKelasFilter.value
+                // 1B & 2B. Sekali ambil (.get()) untuk Admin Pusat
+                repository.fetchUsersOnce(
+                    jurusan = targetJurusan,
+                    kelas = targetKelas,
+                    includeAllRoles = true,
+                    forceRefresh = false
+                )
+                repository.fetchTodayAttendanceOnce(
+                    jurusan = targetJurusan,
+                    kelas = targetKelas,
+                    forceRefresh = false
+                )
+                repository.fetchActivePeriodsOnce(forceRefresh = false)
+            }
+        }
+    }
+
+    /**
+     * Aksi Refresh sekali ambil (.get()) untuk Guru / Admin Pusat memantau data hari ini.
+     */
+    fun refreshMonitoringData(forceRefresh: Boolean = true) {
+        val user = _currentUser.value ?: return
+        if (user.role == Role.SISWA) return
+
+        val targetJurusan = if (user.role == Role.ADMIN_GURU) {
+            user.jurusan ?: if (user.isRestrictedToAssignedScope()) null else _selectedJurusanFilter.value
+        } else {
+            _selectedJurusanFilter.value
+        }
+        val targetKelas = if (user.role == Role.ADMIN_GURU) {
+            user.effectiveKelasFilter() ?: if (user.isWaliKelas()) null else _selectedKelasFilter.value
+        } else {
+            _selectedKelasFilter.value
+        }
+
+        // Untuk ADMIN_GURU: wajib terfilter minimal per jurusan (atau kelas untuk Wali Kelas)
+        // agar 100 guru memantau bersamaan tidak menarik seluruh dokumen sekolah.
+        if (user.role == Role.ADMIN_GURU && (targetJurusan == null || (user.isWaliKelas() && targetKelas == null))) {
+            return
+        }
+
+        repository.fetchUsersOnce(
+            jurusan = targetJurusan,
+            kelas = targetKelas,
+            includeAllRoles = (user.role == Role.ADMIN_PUSAT && targetJurusan == null && targetKelas == null),
+            forceRefresh = forceRefresh
+        )
+        repository.fetchTodayAttendanceOnce(
+            jurusan = targetJurusan,
+            kelas = targetKelas,
+            forceRefresh = forceRefresh
+        )
+        repository.fetchActivePeriodsOnce(forceRefresh = forceRefresh)
+    }
+
+    /**
+     * Aksi Refresh sekali ambil (.get()) untuk daftar akun di halaman Admin Pusat / Manajemen Akun.
+     */
+    fun refreshUsersList(forceRefresh: Boolean = true) {
+        val user = _currentUser.value ?: return
+        if (user.role == Role.SISWA) return
+
+        val includeAll = user.role == Role.ADMIN_PUSAT
+        val targetJurusan = if (includeAll) null else (
+            user.jurusan ?: if (user.isRestrictedToAssignedScope()) null else _selectedJurusanFilter.value
+        )
+        val targetKelas = if (includeAll) null else (
+            user.effectiveKelasFilter() ?: if (user.isWaliKelas()) null else _selectedKelasFilter.value
+        )
+        if (!includeAll && (targetJurusan == null || (user.isWaliKelas() && targetKelas == null))) {
+            return
+        }
+
+        repository.fetchUsersOnce(
+            jurusan = targetJurusan,
+            kelas = targetKelas,
+            includeAllRoles = includeAll,
+            forceRefresh = forceRefresh
+        )
+    }
+
+    /**
+     * 3. Jalur Terpisah untuk Rekap / Laporan 7 Hari (Sekali Ambil / .get()):
+     * Dipanggil saat tab/halaman rekap dibuka atau saat tombol refresh rekap ditekan.
+     */
+    fun loadSevenDayRecap(daysCount: Int = 7, forceRefresh: Boolean = false) {
+        val user = _currentUser.value ?: return
+        if (user.role == Role.SISWA) return
+        val targetJurusan = if (user.role == Role.ADMIN_GURU) {
+            user.jurusan ?: if (user.isRestrictedToAssignedScope()) null else _selectedJurusanFilter.value
+        } else {
+            _selectedJurusanFilter.value
+        }
+        val targetKelas = if (user.role == Role.ADMIN_GURU) {
+            user.effectiveKelasFilter() ?: if (user.isWaliKelas()) null else _selectedKelasFilter.value
+        } else {
+            _selectedKelasFilter.value
+        }
+        if (user.role == Role.ADMIN_GURU && (targetJurusan == null || (user.isWaliKelas() && targetKelas == null))) {
+            return
+        }
+        loadedSevenDayRecapScopeKey = "$daysCount|${targetJurusan?.name ?: "ALL"}|${targetKelas ?: "ALL"}"
+        repository.fetchSevenDayAttendanceRecap(
+            daysCount = daysCount,
+            forceRefresh = forceRefresh,
+            jurusan = targetJurusan,
+            kelas = targetKelas
+        )
     }
 
     fun updateTeacherQualification(jurusan: Jurusan?, kelas: String?) {
         val user = _currentUser.value ?: return
         if (user.role != Role.ADMIN_GURU) return
+        // Wali Kelas & Kaprodi yang sudah memiliki jurusan/kelas yang diampu atau dipilih di awal tidak dapat mengubah ruang lingkupnya
+        if (user.isScopeLocked()) return
         val cleanKelas = kelas?.trim()?.ifEmpty { null }
+        if (user.isWaliKelas() && (jurusan == null || cleanKelas == null)) return
         val updated = repository.updateTeacherQualification(user.id, jurusan, cleanKelas)
             ?: user.copy(jurusan = jurusan, kelas = cleanKelas)
         _currentUser.value = updated
         _selectedJurusanFilter.value = updated.jurusan
         _selectedKelasFilter.value = updated.effectiveKelasFilter()
+
+        // Muat ulang data siswa & absensi hari ini sesuai kualifikasi jurusan/kelas baru via .get()
+        refreshMonitoringData(forceRefresh = true)
     }
 
     // --- REGISTRASI SISWA MANDIRI ---
@@ -124,10 +357,7 @@ class AttendanceViewModel(
     ): Result<UserProfile> {
         val result = repository.registerStudent(fullName, kelas, jurusan, gender, nisn, password)
         result.onSuccess { newStudent ->
-            _currentUser.value = newStudent
-            _currentScreen.value = Screen.DASHBOARD
-            _selectedJurusanFilter.value = null
-            _selectedKelasFilter.value = null
+            activateUserSession(newStudent)
         }
         return result
     }
@@ -159,51 +389,103 @@ class AttendanceViewModel(
     }
 
     fun logout() {
+        // 4B. Tutup seluruh ListenerRegistration saat pengguna logout
+        repository.clearListeners()
+        loadedSevenDayRecapScopeKey = null
         _currentUser.value = null
         _currentScreen.value = Screen.LOGIN
         _selectedJurusanFilter.value = null
         _selectedKelasFilter.value = null
     }
 
+    override fun onCleared() {
+        // 4B. Tutup seluruh ListenerRegistration saat ViewModel dibersihkan
+        repository.clearListeners()
+        super.onCleared()
+    }
+
     fun switchUserDirectly(user: UserProfile) {
-        _currentUser.value = user
-        _currentScreen.value = Screen.DASHBOARD
-        _selectedStatsDate.value = repository.getTodayDateString()
-        if (user.role == Role.ADMIN_GURU) {
-            _selectedJurusanFilter.value = user.jurusan
-            _selectedKelasFilter.value = user.effectiveKelasFilter()
-        } else {
-            _selectedJurusanFilter.value = null
-            _selectedKelasFilter.value = null
-        }
+        activateUserSession(user)
     }
 
     fun navigateTo(screen: Screen) {
         _currentScreen.value = screen
+        val user = _currentUser.value ?: return
+        when (screen) {
+            Screen.MONITORING_REKAP -> {
+                if (user.role != Role.SISWA) {
+                    refreshMonitoringData(forceRefresh = false)
+                }
+            }
+            Screen.ADMIN_USER_MANAGEMENT -> {
+                if (user.role != Role.SISWA) {
+                    refreshUsersList(forceRefresh = false)
+                }
+            }
+            Screen.SCAN_QR -> {
+                repository.observeActiveQrSession(repository.getCurrentActivePrayerSession())
+            }
+            else -> Unit
+        }
     }
 
     fun setJurusanFilter(jurusan: Jurusan?) {
         val user = _currentUser.value
-        if (user?.role == Role.ADMIN_GURU && user.jurusan != null) {
+        if (user?.role == Role.ADMIN_GURU && (user.jurusan != null || user.isRestrictedToAssignedScope())) {
             _selectedJurusanFilter.value = user.jurusan
         } else {
             _selectedJurusanFilter.value = jurusan
             _selectedKelasFilter.value = null
+            if (user != null && user.role != Role.SISWA) {
+                refreshMonitoringData(forceRefresh = false)
+            }
         }
     }
 
     fun setKelasFilter(kelas: String?) {
         val user = _currentUser.value
         val lockedKelas = user?.effectiveKelasFilter()
-        if (user?.role == Role.ADMIN_GURU && lockedKelas != null) {
+        if (user?.role == Role.ADMIN_GURU && (lockedKelas != null || user.isWaliKelas())) {
             _selectedKelasFilter.value = lockedKelas
         } else {
             _selectedKelasFilter.value = kelas?.trim()?.ifEmpty { null }
+            if (user != null && user.role != Role.SISWA) {
+                refreshMonitoringData(forceRefresh = false)
+            }
         }
     }
 
     fun setSelectedStatsDate(dateString: String) {
         _selectedStatsDate.value = dateString
+        val user = _currentUser.value ?: return
+        if (user.role == Role.SISWA) return
+
+        val today = repository.getTodayDateString()
+        val sevenDaysAgo = repository.getDateStringDaysAgo(6)
+        when {
+            dateString == today -> refreshMonitoringData(forceRefresh = false)
+            dateString >= sevenDaysAgo -> loadSevenDayRecap(daysCount = 7, forceRefresh = false)
+            else -> {
+                val targetJurusan = if (user.role == Role.ADMIN_GURU) {
+                    user.jurusan ?: if (user.isRestrictedToAssignedScope()) null else _selectedJurusanFilter.value
+                } else {
+                    _selectedJurusanFilter.value
+                }
+                val targetKelas = if (user.role == Role.ADMIN_GURU) {
+                    user.effectiveKelasFilter() ?: if (user.isWaliKelas()) null else _selectedKelasFilter.value
+                } else {
+                    _selectedKelasFilter.value
+                }
+                if (user.role == Role.ADMIN_GURU && (targetJurusan == null || (user.isWaliKelas() && targetKelas == null))) {
+                    return
+                }
+                repository.fetchAttendanceForSpecificDateOnce(
+                    dateString = dateString,
+                    jurusan = targetJurusan,
+                    kelas = targetKelas
+                )
+            }
+        }
     }
 
     fun setPrayerFilter(prayerType: PrayerType?) {
@@ -285,13 +567,21 @@ class AttendanceViewModel(
         return when (user.role) {
             Role.SISWA -> repository.allStudents.filter { it.nisnOrNip == user.nisnOrNip }
             Role.ADMIN_GURU -> {
-                val qualifiedJurusan = user.jurusan ?: _selectedJurusanFilter.value ?: return emptyList()
+                val qualifiedJurusan = user.jurusan
+                    ?: if (user.isRestrictedToAssignedScope()) return emptyList()
+                    else (_selectedJurusanFilter.value ?: return emptyList())
                 val majorStudents = repository.allStudents.filter { it.jurusan == qualifiedJurusan }
-                val qualifiedKelas = user.effectiveKelasFilter() ?: _selectedKelasFilter.value
-                if (qualifiedKelas != null) {
-                    majorStudents.filter { it.kelas.equals(qualifiedKelas, ignoreCase = true) }
+                val lockedKelas = user.effectiveKelasFilter()
+                if (user.isWaliKelas()) {
+                    val waliKelas = lockedKelas ?: return emptyList()
+                    majorStudents.filter { it.kelas.equals(waliKelas, ignoreCase = true) }
                 } else {
-                    majorStudents
+                    val qualifiedKelas = lockedKelas ?: _selectedKelasFilter.value
+                    if (qualifiedKelas != null) {
+                        majorStudents.filter { it.kelas.equals(qualifiedKelas, ignoreCase = true) }
+                    } else {
+                        majorStudents
+                    }
                 }
             }
             Role.ADMIN_PUSAT -> {
@@ -360,8 +650,8 @@ class AttendanceViewModel(
         } else {
             accessibleStudents.filter {
                 it.fullName.lowercase().contains(query) ||
-                it.nisnOrNip.contains(query) ||
-                (it.kelas?.lowercase()?.contains(query) == true)
+                    it.nisnOrNip.contains(query) ||
+                    (it.kelas?.lowercase()?.contains(query) == true)
             }
         }
 
@@ -449,6 +739,25 @@ class AttendanceViewModel(
         allRecords: List<AttendanceRecord>,
         daysCount: Int = 7
     ): List<DailyPrayerTrend> {
+        // Trigger one-shot 7-day recap (.get()) lazily once per active scope when the recap tab is opened
+        val user = _currentUser.value
+        if (user != null && user.role != Role.SISWA) {
+            val targetJurusan = if (user.role == Role.ADMIN_GURU) {
+                user.jurusan ?: if (user.isRestrictedToAssignedScope()) null else _selectedJurusanFilter.value
+            } else {
+                _selectedJurusanFilter.value
+            }
+            val targetKelas = if (user.role == Role.ADMIN_GURU) {
+                user.effectiveKelasFilter() ?: if (user.isWaliKelas()) null else _selectedKelasFilter.value
+            } else {
+                _selectedKelasFilter.value
+            }
+            val desiredScopeKey = "$daysCount|${targetJurusan?.name ?: "ALL"}|${targetKelas ?: "ALL"}"
+            if (loadedSevenDayRecapScopeKey != desiredScopeKey) {
+                loadSevenDayRecap(daysCount = daysCount, forceRefresh = false)
+            }
+        }
+
         return (0 until daysCount).map { daysAgo ->
             val dateStr = repository.getDateStringDaysAgo(daysAgo)
             val stats = calculatePrayerStatsForDate(allRecords, dateStr)

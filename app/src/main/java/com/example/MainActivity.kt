@@ -78,11 +78,13 @@ import com.example.ui.theme.BrownPrimary
 import com.example.ui.theme.CreamCardBg
 import com.example.ui.theme.CreamPillActive
 import com.example.ui.theme.MyApplicationTheme
+import com.example.data.FirebaseConfig
 import com.example.viewmodel.AttendanceViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        FirebaseConfig.ensureInitialized(applicationContext)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -450,7 +452,7 @@ fun MainApp(
                         color = BrownPrimary
                     )
                     Text(
-                        text = "Pilih kategori pengguna: Siswa, Admin Guru, atau Admin Pusat",
+                        text = "Pilih akun: Admin Pusat, Kaprodi, Wali Kelas, Guru BK, Guru Agama, atau Siswa",
                         fontSize = 11.sp,
                         color = Color.Gray,
                         modifier = Modifier.padding(bottom = 12.dp)
@@ -458,7 +460,7 @@ fun MainApp(
 
                     // 1. Admin Pusat
                     Text(
-                        text = "ADMIN PUSAT",
+                        text = "ADMIN PUSAT (KONTROL SEMUA AKUN)",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = BrownDark
@@ -489,7 +491,11 @@ fun MainApp(
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(text = user.fullName, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = BrownDark)
-                                    Text(text = "Admin Pusat • 7 Jurusan", fontSize = 10.sp, color = Color.Gray)
+                                    Text(
+                                        text = "Admin Pusat • Kontrol Semua Akun & 7 Jurusan",
+                                        fontSize = 10.sp,
+                                        color = Color.Gray
+                                    )
                                 }
                                 if (isSelected) {
                                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = BrownPrimary, modifier = Modifier.size(16.dp))
@@ -500,9 +506,9 @@ fun MainApp(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // 2. Admin Guru
+                    // 2. Kaprodi, Wali Kelas, Guru BK & Guru Agama
                     Text(
-                        text = "ADMIN GURU",
+                        text = "KAPRODI, WALI KELAS, GURU BK & GURU AGAMA",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = BrownDark
@@ -548,7 +554,7 @@ fun MainApp(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // 3. Siswa
+                    // 2. Siswa
                     Text(
                         text = "SISWA",
                         fontSize = 10.sp,

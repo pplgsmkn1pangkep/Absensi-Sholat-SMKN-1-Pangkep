@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -104,16 +105,12 @@ fun TeacherPercentageTab(
     val twoDaysAgo = viewModel.repository.getDateStringDaysAgo(2)
     val threeDaysAgo = viewModel.repository.getDateStringDaysAgo(3)
 
-    // Recompute stats whenever records, users, date, or filters change
-    val stats = remember(allRecords, allUsers, selectedDate, selectedJurusanFilter, selectedKelasFilter, currentUser) {
-        viewModel.calculatePrayerStatsForDate(allRecords, selectedDate)
-    }
-    val recentTrend = remember(allRecords, allUsers, selectedJurusanFilter, selectedKelasFilter, currentUser) {
-        viewModel.calculateRecentDaysTrend(allRecords, daysCount = 7)
-    }
-
-    var isEditingQualification by remember(currentUser.id) {
-        mutableStateOf(currentUser.role == Role.ADMIN_GURU && currentUser.jurusan == null)
+    val isScopeLocked = currentUser.isScopeLocked()
+    val needsInitialSetup = currentUser.role == Role.ADMIN_GURU && (
+        currentUser.jurusan == null || (currentUser.isWaliKelas() && currentUser.effectiveKelasFilter() == null)
+    )
+    var isEditingQualification by remember(currentUser.id, isScopeLocked, needsInitialSetup) {
+        mutableStateOf(needsInitialSetup && !isScopeLocked)
     }
     var draftJurusan by remember(currentUser.jurusan) {
         mutableStateOf(currentUser.jurusan ?: Jurusan.PPLG)
@@ -123,6 +120,20 @@ fun TeacherPercentageTab(
     }
     var showDatePicker by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
+    var showSevenDayHistory by remember(currentUser.id) { mutableStateOf(false) }
+
+    // Recompute stats whenever records, users, date, or filters change
+    val stats = remember(allRecords, allUsers, selectedDate, selectedJurusanFilter, selectedKelasFilter, currentUser) {
+        viewModel.calculatePrayerStatsForDate(allRecords, selectedDate)
+    }
+    // Only compute & load 7-day prayer percentage history when explicitly requested in the date monitoring section
+    val recentTrend = remember(showSevenDayHistory, allRecords, allUsers, selectedJurusanFilter, selectedKelasFilter, currentUser) {
+        if (showSevenDayHistory) {
+            viewModel.calculateRecentDaysTrend(allRecords, daysCount = 7)
+        } else {
+            emptyList()
+        }
+    }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -209,44 +220,82 @@ fun TeacherPercentageTab(
                     }
 
                     if (currentUser.role == Role.ADMIN_GURU) {
-                        TextButton(
-                            onClick = {
-                                draftJurusan = currentUser.jurusan ?: Jurusan.PPLG
-                                draftKelas = currentUser.effectiveKelasFilter() ?: ""
-                                isEditingQualification = !isEditingQualification
-                            },
-                            modifier = Modifier.testTag("toggle_qualification_edit_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = BrownPrimary
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (isEditingQualification) "Tutup" else "Pilih Jurusan",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = BrownPrimary
-                            )
+                        if (isScopeLocked) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = BrownContainer,
+                                modifier = Modifier.testTag("locked_scope_badge")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Lock,
+                                        contentDescription = "Akses Terkunci",
+                                        modifier = Modifier.size(13.dp),
+                                        tint = BrownPrimary
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Terkunci",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = BrownDark
+                                    )
+                                }
+                            }
+                        } else {
+                            TextButton(
+                                onClick = {
+                                    draftJurusan = currentUser.jurusan ?: Jurusan.PPLG
+                                    draftKelas = currentUser.effectiveKelasFilter() ?: ""
+                                    isEditingQualification = !isEditingQualification
+                                },
+                                modifier = Modifier.testTag("toggle_qualification_edit_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = BrownPrimary
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (isEditingQualification) "Tutup" else "Pilih Jurusan",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BrownPrimary
+                                )
+                            }
                         }
                     }
                 }
 
-                if (currentUser.role == Role.ADMIN_GURU && currentUser.jurusan != null && !isEditingQualification) {
+                if (currentUser.role == Role.ADMIN_GURU && !needsInitialSetup && !isEditingQualification) {
                     Spacer(modifier = Modifier.height(6.dp))
+                    val scopeMessage = when {
+                        currentUser.isWaliKelas() ->
+                            "Tampilan dibatasi khusus kelas binaan Anda: ${currentUser.effectiveKelasFilter()} (${stats.totalStudents} siswa)."
+                        currentUser.isKaprodi() && currentUser.effectiveKelasFilter() != null ->
+                            "Tampilan dibatasi khusus kelas pilihan awal Anda: ${currentUser.effectiveKelasFilter()} (${stats.totalStudents} siswa)."
+                        currentUser.isKaprodi() ->
+                            "Tampilan dibatasi khusus jurusan yang Anda ampu: ${currentUser.jurusan?.code} (${stats.totalStudents} siswa)."
+                        else ->
+                            "Data di bawah menampilkan siswa ${currentUser.effectiveKelasFilter() ?: "jurusan ${currentUser.jurusan?.code}"} (${stats.totalStudents} siswa)."
+                    }
                     Text(
-                        text = "Data di bawah hanya menampilkan siswa ${currentUser.effectiveKelasFilter() ?: "jurusan ${currentUser.jurusan.code}"} (${stats.totalStudents} siswa).",
+                        text = scopeMessage,
                         fontSize = 11.sp,
                         color = Color(0xFF5A4A42)
                     )
                 }
 
-                // Class quick filter for Kaprodi (who oversees all classes of 1 jurusan)
+                // Class quick filter ONLY for Kaprodi without a locked single class (within their own jurusan) or non-restricted teachers
                 if (currentUser.role == Role.ADMIN_GURU &&
                     currentUser.jurusan != null &&
                     currentUser.effectiveKelasFilter() == null &&
+                    !currentUser.isWaliKelas() &&
                     !isEditingQualification
                 ) {
                     val availableClasses = remember(currentUser.jurusan, allUsers) {
@@ -349,8 +398,9 @@ fun TeacherPercentageTab(
                     }
                 }
 
-                // Inline Jurusan & Kelas Qualification Picker for Guru / Kaprodi
-                AnimatedVisibility(visible = isEditingQualification && currentUser.role == Role.ADMIN_GURU) {
+                // Inline Jurusan & Kelas Qualification Picker (hidden permanently once Wali Kelas / Kaprodi scope is locked)
+                AnimatedVisibility(visible = isEditingQualification && currentUser.role == Role.ADMIN_GURU && !isScopeLocked) {
+                    val isWali = currentUser.isWaliKelas()
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -359,7 +409,13 @@ fun TeacherPercentageTab(
                     ) {
                         HorizontalDivider(color = CreamCardBorder)
                         Text(
-                            text = "Pilih Jurusan & Kelas yang Anda Pantau:",
+                            text = if (isWali) {
+                                "Pilih Jurusan & Kelas Binaan Anda (dikunci setelah diterapkan):"
+                            } else if (currentUser.isKaprodi()) {
+                                "Pilih Jurusan / Kelas yang Anda Ampu (dikunci setelah diterapkan):"
+                            } else {
+                                "Pilih Jurusan & Kelas yang Anda Pantau:"
+                            },
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = BrownDark
@@ -376,7 +432,11 @@ fun TeacherPercentageTab(
                                     selected = draftJurusan == jur,
                                     onClick = {
                                         draftJurusan = jur
-                                        draftKelas = ""
+                                        draftKelas = if (isWali) {
+                                            viewModel.repository.getKnownClassesForJurusan(jur).firstOrNull().orEmpty()
+                                        } else {
+                                            ""
+                                        }
                                     },
                                     label = { Text(jur.code, fontSize = 11.5.sp, fontWeight = FontWeight.Bold) },
                                     colors = FilterChipDefaults.filterChipColors(
@@ -392,7 +452,11 @@ fun TeacherPercentageTab(
                             viewModel.repository.getKnownClassesForJurusan(draftJurusan)
                         }
                         Text(
-                            text = "Pilih Kelas (kosongkan / 'Semua Kelas' untuk Kaprodi):",
+                            text = if (isWali) {
+                                "Pilih 1 Kelas Binaan Wali Kelas (wajib):"
+                            } else {
+                                "Pilih Kelas (kosongkan / 'Semua Kelas' untuk Kaprodi, Guru BK, atau Guru Agama):"
+                            },
                             fontSize = 11.sp,
                             color = Color(0xFF5A4A42)
                         )
@@ -402,15 +466,17 @@ fun TeacherPercentageTab(
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            FilterChip(
-                                selected = draftKelas.isBlank(),
-                                onClick = { draftKelas = "" },
-                                label = { Text("Semua Kelas ${draftJurusan.code}", fontSize = 11.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = BrownPrimary,
-                                    selectedLabelColor = Color.White
+                            if (!isWali) {
+                                FilterChip(
+                                    selected = draftKelas.isBlank(),
+                                    onClick = { draftKelas = "" },
+                                    label = { Text("Semua Kelas ${draftJurusan.code}", fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = BrownPrimary,
+                                        selectedLabelColor = Color.White
+                                    )
                                 )
-                            )
+                            }
                             suggestedClasses.forEach { cls ->
                                 FilterChip(
                                     selected = draftKelas.equals(cls, ignoreCase = true),
@@ -424,28 +490,33 @@ fun TeacherPercentageTab(
                             }
                         }
 
-                        OutlinedTextField(
-                            value = draftKelas,
-                            onValueChange = { draftKelas = it },
-                            label = { Text("Atau ketik kelas spesifik (opsional)") },
-                            placeholder = { Text("Contoh: ${draftJurusan.officialClasses.firstOrNull() ?: "X PPLG"}") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = ScanGreenPrimary,
-                                focusedLabelColor = ScanGreenPrimary
+                        if (!isWali) {
+                            OutlinedTextField(
+                                value = draftKelas,
+                                onValueChange = { draftKelas = it },
+                                label = { Text("Atau ketik kelas spesifik (opsional)") },
+                                placeholder = { Text("Contoh: ${draftJurusan.officialClasses.firstOrNull() ?: "X PPLG"}") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = ScanGreenPrimary,
+                                    focusedLabelColor = ScanGreenPrimary
+                                )
                             )
-                        )
+                        }
 
                         Button(
                             onClick = {
+                                val resolvedKelas = draftKelas.trim().ifEmpty { null }
+                                if (isWali && resolvedKelas == null) return@Button
                                 viewModel.updateTeacherQualification(
                                     jurusan = draftJurusan,
-                                    kelas = draftKelas.trim().ifEmpty { null }
+                                    kelas = resolvedKelas
                                 )
                                 isEditingQualification = false
                             },
+                            enabled = !isWali || draftKelas.isNotBlank(),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("save_qualification_btn"),
@@ -455,7 +526,11 @@ fun TeacherPercentageTab(
                             Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Terapkan Kualifikasi ${draftJurusan.code}",
+                                text = if (isWali) {
+                                    "Kunci Kelas ${draftKelas.ifBlank { draftJurusan.code }}"
+                                } else {
+                                    "Terapkan Kualifikasi ${draftJurusan.code}"
+                                },
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
                             )
@@ -554,6 +629,138 @@ fun TeacherPercentageTab(
                         ),
                         modifier = Modifier.testTag("date_picker_chip")
                     )
+                    FilterChip(
+                        selected = showSevenDayHistory,
+                        onClick = { showSevenDayHistory = !showSevenDayHistory },
+                        leadingIcon = {
+                            Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(15.dp))
+                        },
+                        label = {
+                            Text(
+                                text = if (showSevenDayHistory) "Tutup Riwayat" else "Riwayat Persentase",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = BrownPrimary,
+                            selectedLabelColor = Color.White
+                        ),
+                        modifier = Modifier.testTag("toggle_seven_day_history_chip")
+                    )
+                }
+
+                if (!showSevenDayHistory) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Ketuk \"Riwayat Persentase\" di atas jika ingin melihat riwayat persentase sholat 7 hari terakhir.",
+                        fontSize = 10.5.sp,
+                        color = Color.Gray
+                    )
+                }
+            }
+        }
+
+        // RIWAYAT PERSENTASE 7 HARI TERAKHIR (HANYA TAMPIL JIKA DIMINTA DI TAB PILIH HARI / TANGGAL)
+        AnimatedVisibility(visible = showSevenDayHistory && stats.totalStudents > 0) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("past_days_percentage_card"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, CreamCardBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = null,
+                                tint = BrownPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Riwayat Persentase 7 Hari Terakhir",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = BrownDark
+                            )
+                        }
+                        TextButton(
+                            onClick = { showSevenDayHistory = false },
+                            modifier = Modifier.testTag("close_seven_day_history_btn")
+                        ) {
+                            Text(
+                                text = "Tutup",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = BrownPrimary
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Ketuk baris hari untuk melihat rincian tanggal tersebut",
+                        fontSize = 11.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
+                    )
+
+                    recentTrend.forEachIndexed { idx, dayTrend ->
+                        val isSelected = dayTrend.dateString == selectedDate
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { viewModel.setSelectedStatsDate(dayTrend.dateString) },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) ScanGreenBg else CreamCardBg,
+                            border = if (isSelected) BorderStroke(1.2.dp, ScanGreenPrimary) else null
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = dayTrend.label,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold,
+                                        color = if (isSelected) ScanGreenDark else BrownDark
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        MiniPercentBadge("Dhuha", dayTrend.dhuhaPercentage, AmberContainer, BrownDark)
+                                        MiniPercentBadge("Dzuhur", dayTrend.dzuhurPercentage, BrownContainer, BrownDark)
+                                        MiniPercentBadge("Ashar", dayTrend.asharPercentage, Color(0xFFE8F5E9), TicketGreenPass)
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(5.dp))
+                                LinearProgressIndicator(
+                                    progress = { (dayTrend.goHomePercentage / 100f).coerceIn(0f, 1f) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(4.dp)),
+                                    color = if (isSelected) ScanGreenPrimary else BrownPrimary,
+                                    trackColor = Color(0xFFE8E0D8),
+                                    strokeCap = StrokeCap.Round
+                                )
+                            }
+                        }
+                        if (idx < recentTrend.lastIndex) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                        }
+                    }
                 }
             }
         }
@@ -710,89 +917,7 @@ fun TeacherPercentageTab(
             }
         }
 
-        // 4. PERBANDINGAN 7 HARI TERAKHIR (HARI INI VS HARI YANG LALU)
-        if (stats.totalStudents > 0) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("past_days_percentage_card"),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.dp, CreamCardBorder)
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.History,
-                            contentDescription = null,
-                            tint = BrownPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Riwayat Persentase 7 Hari Terakhir",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = BrownDark
-                        )
-                    }
-                    Text(
-                        text = "Ketuk baris hari untuk melihat rincian tanggal tersebut",
-                        fontSize = 11.sp,
-                        color = Color.Gray,
-                        modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
-                    )
-
-                    recentTrend.forEachIndexed { idx, dayTrend ->
-                        val isSelected = dayTrend.dateString == selectedDate
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 3.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { viewModel.setSelectedStatsDate(dayTrend.dateString) },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isSelected) ScanGreenBg else CreamCardBg,
-                            border = if (isSelected) BorderStroke(1.2.dp, ScanGreenPrimary) else null
-                        ) {
-                            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = dayTrend.label,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold,
-                                        color = if (isSelected) ScanGreenDark else BrownDark
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        MiniPercentBadge("Dhuha", dayTrend.dhuhaPercentage, AmberContainer, BrownDark)
-                                        MiniPercentBadge("Dzuhur", dayTrend.dzuhurPercentage, BrownContainer, BrownDark)
-                                        MiniPercentBadge("Ashar", dayTrend.asharPercentage, Color(0xFFE8F5E9), TicketGreenPass)
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(5.dp))
-                                LinearProgressIndicator(
-                                    progress = { (dayTrend.goHomePercentage / 100f).coerceIn(0f, 1f) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(6.dp)
-                                        .clip(RoundedCornerShape(4.dp)),
-                                    color = if (isSelected) ScanGreenPrimary else BrownPrimary,
-                                    trackColor = Color(0xFFE8E0D8),
-                                    strokeCap = StrokeCap.Round
-                                )
-                            }
-                        }
-                        if (idx < recentTrend.lastIndex) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                        }
-                    }
-                }
-            }
-        }
+        // (Riwayat Persentase 7 Hari Terakhir ditampilkan secara on-demand pada bagian Pilih Hari / Tanggal Pemantauan di atas)
 
         // 5. PERSENTASE PER KELAS (DALAM JURUSAN TERPILIH)
         if (stats.classBreakdown.isNotEmpty()) {

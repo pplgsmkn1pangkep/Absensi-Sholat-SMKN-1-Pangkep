@@ -184,8 +184,13 @@ fun DashboardScreen(
                             shape = RoundedCornerShape(10.dp),
                             color = AmberContainer
                         ) {
+                            val badgeLabel = when (currentUser.role) {
+                                Role.SISWA -> "Siswa"
+                                Role.ADMIN_GURU -> currentUser.effectiveJabatanLabel()
+                                Role.ADMIN_PUSAT -> "Admin Pusat"
+                            }
                             Text(
-                                text = currentUser.role.title.split(" ").first(),
+                                text = badgeLabel,
                                 color = BrownDark,
                                 fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold,

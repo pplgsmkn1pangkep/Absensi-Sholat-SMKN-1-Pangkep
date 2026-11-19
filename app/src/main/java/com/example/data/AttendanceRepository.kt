@@ -1,7 +1,6 @@
 package com.example.data
 
 import android.util.Log
-import com.example.R
 import com.example.model.AttendanceRecord
 import com.example.model.DhuhaStatus
 import com.example.model.DynamicQrToken
@@ -11,8 +10,9 @@ import com.example.model.PeriodRecord
 import com.example.model.PrayerType
 import com.example.model.Role
 import com.example.model.UserProfile
-import com.google.firebase.FirebaseApp
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,14 +21,24 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+
 class AttendanceRepository(
     private val firestore: FirebaseFirestore? = try {
         FirebaseFirestore.getInstance()
     } catch (e: Throwable) {
-        Log.w("AttendanceRepo", "Firestore not available or uninitialized, falling back to local storage: ${e.message}")
-        null
+        try {
+            FirebaseConfig.getFirestore()
+        } catch (fallbackError: Throwable) {
+            Log.w(
+                "AttendanceRepo",
+                "Firestore not available or uninitialized, falling back to local storage: ${fallbackError.message}"
+            )
+            null
+        }
     }
-) {    // Predefined accounts categorized into Admin Pusat, Admin Guru, and Siswa (with explicit Gender)
+) {
+
+    // Predefined accounts categorized into Admin Pusat, Admin Guru, and Siswa (with explicit Gender)
     private val initialUsers: List<UserProfile> = listOf(
         // 1. Admin Pusat
         UserProfile(
@@ -108,6 +118,10 @@ class AttendanceRepository(
     private val _attendanceRecords = MutableStateFlow<List<AttendanceRecord>>(emptyList())
     val attendanceRecords: StateFlow<List<AttendanceRecord>> = _attendanceRecords.asStateFlow()
 
+    // Dedicated state for one-shot 7-day recap results
+    private val _sevenDayRecapRecords = MutableStateFlow<List<AttendanceRecord>>(emptyList())
+    val sevenDayRecapRecords: StateFlow<List<AttendanceRecord>> = _sevenDayRecapRecords.asStateFlow()
+
     // Period / Halangan Syar'i records for female students
     private val _periodRecords = MutableStateFlow<List<PeriodRecord>>(emptyList())
     val periodRecords: StateFlow<List<PeriodRecord>> = _periodRecords.asStateFlow()
@@ -118,13 +132,39 @@ class AttendanceRepository(
     private val _currentActiveQr = MutableStateFlow<DynamicQrToken?>(null)
     val currentActiveQr: StateFlow<DynamicQrToken?> = _currentActiveQr.asStateFlow()
 
+    private val _isLoadingRemote = MutableStateFlow(false)
+    val isLoadingRemote: StateFlow<Boolean> = _isLoadingRemote.asStateFlow()
+
+    // Active scoped listeners (MUST be declared above init and removed on logout / onCleared)
+    private var studentAttendanceListener: ListenerRegistration? = null
+    private var studentPeriodListener: ListenerRegistration? = null
+    private var activeQrListener: ListenerRegistration? = null
+    private var listeningQrPrayer: PrayerType? = null
+
+    // Cooldown cache timestamps to prevent redundant .get() reads on rapid tab/filter switches
+    private var lastUsersFetchKey: String? = null
+    private var lastUsersFetchMillis: Long = 0L
+    private var lastTodayAttendanceFetchKey: String? = null
+    private var lastTodayAttendanceFetchMillis: Long = 0L
+    private var lastSevenDayRecapKey: String? = null
+    private var lastSevenDayRecapMillis: Long = 0L
+    private var lastSevenDayRecapCoversAllScopes: Boolean = false
+    private var lastActivePeriodsFetchMillis: Long = 0L
+    private val syncedRemoteQrDates = mutableMapOf<PrayerType, String>()
+
+    companion object {
+        private const val TAG = "AttendanceRepo"
+        private const val CACHE_COOLDOWN_MS = 30_000L
+        private const val USERS_CACHE_COOLDOWN_MS = 300_000L
+        private const val RECAP_CACHE_COOLDOWN_MS = 300_000L
+    }
+
     init {
         val today = getTodayDateString()
-
         val yesterday = getDateStringDaysAgo(1)
         val twoDaysAgo = getDateStringDaysAgo(2)
 
-        // Seed initial local fallback attendance (Today + Past Days for percentage history)
+        // Seed initial local fallback attendance (used offline / before remote sync returns)
         val initialList = mutableListOf(
             AttendanceRecord(
                 id = UUID.randomUUID().toString(),
@@ -303,96 +343,554 @@ class AttendanceRepository(
         )
         _periodRecords.value = listOf(sitiRecord)
 
-        // Seed distinct local tokens per prayer type WITHOUT overwriting Firestore on app startup
+        // Seed distinct local tokens per prayer type WITHOUT querying/overwriting Firestore on cold start
         val initialTokens = PrayerType.entries.associateWith { createTokenForPrayer(it, today) }
         _activeQrByPrayer.value = initialTokens
-        _currentActiveQr.value = initialTokens[PrayerType.DZUHUR]
+        _currentActiveQr.value = initialTokens[getCurrentActivePrayerSession()]
 
-        // Connect to Cloud Firestore Realtime Sync
-        firestore?.let { db ->
-            // Keep Admin Pusat account name in sync with Cloud Firestore
-            initialUsers.filter { it.role == Role.ADMIN_PUSAT }.forEach { adminUser ->
-                db.collection("users").document(adminUser.id).set(userToMap(adminUser))
-            }
-            setupFirestoreSync(db)
-        }
+        // Hemat kuota Spark Plan: TIDAK memasang listener koleksi global saat startup sebelum login.
+        // Semua query/listener dipasang sesuai peran (SISWA / ADMIN_GURU / ADMIN_PUSAT) setelah login.
     }
 
-    private fun setupFirestoreSync(db: FirebaseFirestore) {
-        // 1. Synchronize Users
-        db.collection("users").addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                Log.w("AttendanceRepo", "Users listener error: ${error.message}")
-                return@addSnapshotListener
-            }
-            if (snapshot != null) {
-                if (snapshot.isEmpty) {
-                    // Seed initial predefined accounts into Firestore
-                    initialUsers.forEach { user ->
-                        db.collection("users").document(user.id).set(userToMap(user))
-                    }
-                } else {
-                    val loaded = snapshot.documents.mapNotNull { doc -> mapToUser(doc.id, doc.data) }
-                    if (loaded.isNotEmpty()) {
-                        _allUsers.value = loaded
-                    }
-                }
-            }
+    // =========================================================================
+    // SPARK-PLAN QUOTA-OPTIMIZED FIRESTORE QUERIES & SCOPED LISTENERS
+    // =========================================================================
+
+    /**
+     * 1A. Efisiensi Login:
+     * Mengecek akun pengguna yang login menggunakan query spesifik:
+     * .whereEqualTo("nisnOrNip", username).limit(1).get()
+     * (Maksimal 1 Read per login, TIDAK mengunduh seluruh koleksi users).
+     */
+    fun fetchUserByNisnOrNip(
+        username: String,
+        onResult: (UserProfile?) -> Unit
+    ) {
+        val cleanUsername = username.trim()
+        if (cleanUsername.isEmpty()) {
+            onResult(null)
+            return
         }
 
-        // 2. Synchronize Attendance Records
-        db.collection("attendance_records").addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                Log.w("AttendanceRepo", "Attendance listener error: ${error.message}")
-                return@addSnapshotListener
+        val db = firestore
+        if (db == null) {
+            val local = _allUsers.value.find {
+                it.nisnOrNip.equals(cleanUsername, ignoreCase = true) ||
+                    it.id.equals(cleanUsername, ignoreCase = true)
             }
-            if (snapshot != null && !snapshot.isEmpty) {
-                val records = snapshot.documents.mapNotNull { doc -> mapToAttendance(doc.id, doc.data) }
-                if (records.isNotEmpty()) {
-                    _attendanceRecords.value = records
-                }
-            }
+            onResult(local)
+            return
         }
 
-        // 3. Synchronize Period Records (Halangan Syar'i)
-        db.collection("period_records").addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                Log.w("AttendanceRepo", "Period listener error: ${error.message}")
-                return@addSnapshotListener
-            }
-            if (snapshot != null && !snapshot.isEmpty) {
-                val pRecords = snapshot.documents.mapNotNull { doc -> mapToPeriod(doc.id, doc.data) }
-                if (pRecords.isNotEmpty()) {
-                    _periodRecords.value = pRecords
+        _isLoadingRemote.value = true
+        db.collection("users")
+            .whereEqualTo("nisnOrNip", cleanUsername)
+            .limit(1)
+            .get()
+            .addOnSuccessListener { snapshot ->
+                _isLoadingRemote.value = false
+                val doc = snapshot.documents.firstOrNull()
+                val remoteUser = doc?.let { mapToUser(it.id, it.data) }
+                if (remoteUser != null) {
+                    upsertUsersLocally(listOf(remoteUser))
                 }
+                onResult(remoteUser)
             }
+            .addOnFailureListener { error ->
+                _isLoadingRemote.value = false
+                Log.w(TAG, "Login query error for '$cleanUsername': ${error.message}")
+                onResult(null)
+            }
+    }
+
+    /**
+     * 1B. Efisiensi Daftar Users untuk Admin / Guru (Sekali Ambil / .get(), BUKAN addSnapshotListener):
+     * - Jika Wali Kelas (kelas != null): hanya mengambil siswa pada kelas tersebut.
+     * - Jika Kaprodi / Guru Jurusan (jurusan != null): hanya mengambil siswa pada jurusan tersebut.
+     * - Jika Admin Pusat (includeAllRoles = true / tanpa filter): mengambil daftar users sekali jalan.
+     */
+    fun fetchUsersOnce(
+        jurusan: Jurusan? = null,
+        kelas: String? = null,
+        includeAllRoles: Boolean = false,
+        forceRefresh: Boolean = false,
+        onComplete: ((List<UserProfile>) -> Unit)? = null
+    ) {
+        val db = firestore ?: run {
+            onComplete?.invoke(_allUsers.value)
+            return
         }
 
-        // 4. Synchronize Active Mosque Dynamic QR Sessions (per prayer type)
-        db.collection("active_qr_tokens").addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                Log.w("AttendanceRepo", "QR session listener error: ${error.message}")
-                return@addSnapshotListener
-            }
-            if (snapshot != null) {
-                val today = getTodayDateString()
-                val updatedMap = _activeQrByPrayer.value.toMutableMap()
-                var changed = false
-                snapshot.documents.forEach { doc ->
-                    if (doc.id.startsWith("session_")) {
-                        val token = mapToQrToken(doc.data)
-                        if (token != null && token.dateString == today) {
-                            updatedMap[token.prayerType] = token
-                            changed = true
+        val cleanKelas = kelas?.trim()?.takeIf { it.isNotEmpty() }
+        val fetchKey = "${jurusan?.name ?: "ALL"}|${cleanKelas ?: "ALL"}|$includeAllRoles"
+        val now = System.currentTimeMillis()
+        val isCoveredByFullCache = lastUsersFetchKey == "ALL|ALL|true" &&
+            (now - lastUsersFetchMillis) < USERS_CACHE_COOLDOWN_MS
+        if (!forceRefresh && (isCoveredByFullCache ||
+                (lastUsersFetchKey == fetchKey && (now - lastUsersFetchMillis) < USERS_CACHE_COOLDOWN_MS))
+        ) {
+            onComplete?.invoke(_allUsers.value)
+            return
+        }
+
+        val query: Query = when {
+            includeAllRoles -> db.collection("users")
+            cleanKelas != null -> db.collection("users")
+                .whereEqualTo("role", Role.SISWA.name)
+                .whereEqualTo("kelas", cleanKelas)
+            jurusan != null -> db.collection("users")
+                .whereEqualTo("role", Role.SISWA.name)
+                .whereEqualTo("jurusan", jurusan.name)
+            else -> db.collection("users")
+                .whereEqualTo("role", Role.SISWA.name)
+        }
+
+        _isLoadingRemote.value = true
+        query.get()
+            .addOnSuccessListener { snapshot ->
+                _isLoadingRemote.value = false
+                lastUsersFetchKey = fetchKey
+                lastUsersFetchMillis = System.currentTimeMillis()
+                val loaded = snapshot.documents.mapNotNull { doc -> mapToUser(doc.id, doc.data) }
+                if (loaded.isNotEmpty()) {
+                    if (includeAllRoles || (jurusan == null && cleanKelas == null)) {
+                        // Full fetch for Admin Pusat: merge while preserving protected initial admins if absent
+                        val merged = loaded.toMutableList()
+                        initialUsers.filter { it.role == Role.ADMIN_PUSAT }.forEach { adminUser ->
+                            if (merged.none { it.id == adminUser.id }) {
+                                merged.add(adminUser)
+                            }
                         }
+                        _allUsers.value = merged
+                    } else {
+                        // Scoped fetch for Guru/Kaprodi: replace only students inside this scope,
+                        // keeping the logged-in teacher and other cached accounts intact.
+                        val remaining = _allUsers.value.filterNot { existing ->
+                            existing.role == Role.SISWA &&
+                                (jurusan == null || existing.jurusan == jurusan) &&
+                                (cleanKelas == null || existing.kelas.equals(cleanKelas, ignoreCase = true))
+                        }
+                        _allUsers.value = mergeUsersById(remaining, loaded)
                     }
                 }
-                if (changed) {
-                    _activeQrByPrayer.value = updatedMap
+                onComplete?.invoke(_allUsers.value)
+            }
+            .addOnFailureListener { error ->
+                _isLoadingRemote.value = false
+                Log.w(TAG, "fetchUsersOnce failed ($fetchKey): ${error.message}")
+                onComplete?.invoke(_allUsers.value)
+            }
+    }
+
+    /**
+     * 2A. Filter Absensi Role SISWA (Realtime Listener Terbatas):
+     * Memasang addSnapshotListener pada attendance_records HANYA untuk dokumen milik siswa ini
+     * (whereEqualTo("studentId", student.id)) dan tanggal hari ini (whereEqualTo("dateString", today)).
+     * Tidak pernah memuat data absensi siswa lain pada akun siswa.
+     */
+    fun startStudentAttendanceListener(student: UserProfile) {
+        studentAttendanceListener?.remove()
+        studentAttendanceListener = null
+        studentPeriodListener?.remove()
+        studentPeriodListener = null
+
+        val today = getTodayDateString()
+        // Isolasi data lokal: akun siswa hanya menyimpan data absensinya sendiri untuk hari ini
+        _attendanceRecords.value = _attendanceRecords.value.filter {
+            it.nisn == student.nisnOrNip && it.dateString == today
+        }
+
+        val db = firestore ?: return
+
+        studentAttendanceListener = db.collection("attendance_records")
+            .whereEqualTo("studentId", student.id)
+            .whereEqualTo("dateString", today)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Student attendance listener error: ${error.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val remoteRecords = snapshot.documents.mapNotNull { doc -> mapToAttendance(doc.id, doc.data) }
+                    // Strictly isolate to this student's own today records
+                    _attendanceRecords.value = remoteRecords
                 }
             }
+
+        // Khusus siswa perempuan: dengarkan hanya status halangan aktif milik siswa sendiri (0-1 dokumen)
+        if (student.gender == Gender.PEREMPUAN) {
+            studentPeriodListener = db.collection("period_records")
+                .whereEqualTo("nisn", student.nisnOrNip)
+                .whereEqualTo("isActive", true)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "Student period listener error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        val remotePeriods = snapshot.documents.mapNotNull { doc -> mapToPeriod(doc.id, doc.data) }
+                        val others = _periodRecords.value.filterNot { it.nisn == student.nisnOrNip }
+                        _periodRecords.value = others + remotePeriods
+                    }
+                }
         }
     }
+
+    /**
+     * 2B. Filter Absensi Role ADMIN_GURU / ADMIN_PUSAT (Sekali Ambil / .get() Hari Ini):
+     * Mengambil data attendance_records khusus tanggal hari ini (whereEqualTo("dateString", today))
+     * disertai filter kelas / jurusan jika tersedia agar 100 guru memantau bersamaan tetap sangat hemat kuota.
+     */
+    fun fetchTodayAttendanceOnce(
+        jurusan: Jurusan? = null,
+        kelas: String? = null,
+        forceRefresh: Boolean = false,
+        onComplete: ((List<AttendanceRecord>) -> Unit)? = null
+    ) {
+        val db = firestore ?: run {
+            onComplete?.invoke(_attendanceRecords.value)
+            return
+        }
+
+        val today = getTodayDateString()
+        val cleanKelas = kelas?.trim()?.takeIf { it.isNotEmpty() }
+        val fetchKey = "$today|${jurusan?.name ?: "ALL"}|${cleanKelas ?: "ALL"}"
+        val now = System.currentTimeMillis()
+        if (!forceRefresh && lastTodayAttendanceFetchKey == fetchKey && (now - lastTodayAttendanceFetchMillis) < CACHE_COOLDOWN_MS) {
+            onComplete?.invoke(_attendanceRecords.value)
+            return
+        }
+
+        var query: Query = db.collection("attendance_records")
+            .whereEqualTo("dateString", today)
+        if (cleanKelas != null) {
+            query = query.whereEqualTo("kelas", cleanKelas)
+        } else if (jurusan != null) {
+            query = query.whereEqualTo("jurusan", jurusan.name)
+        }
+
+        _isLoadingRemote.value = true
+        query.get()
+            .addOnSuccessListener { snapshot ->
+                _isLoadingRemote.value = false
+                lastTodayAttendanceFetchKey = fetchKey
+                lastTodayAttendanceFetchMillis = System.currentTimeMillis()
+                val loaded = snapshot.documents.mapNotNull { doc -> mapToAttendance(doc.id, doc.data) }
+                replaceAttendanceScopeLocally(
+                    targetDate = today,
+                    jurusan = jurusan,
+                    kelas = cleanKelas,
+                    newRecords = loaded
+                )
+                onComplete?.invoke(_attendanceRecords.value)
+            }
+            .addOnFailureListener { error ->
+                Log.w(TAG, "Scoped today attendance query failed ($fetchKey), falling back to date-only query: ${error.message}")
+                // Safe fallback if a scoped query ever fails: query by dateString only
+                if (cleanKelas != null || jurusan != null) {
+                    db.collection("attendance_records")
+                        .whereEqualTo("dateString", today)
+                        .get()
+                        .addOnSuccessListener { fallbackSnap ->
+                            _isLoadingRemote.value = false
+                            lastTodayAttendanceFetchKey = fetchKey
+                            lastTodayAttendanceFetchMillis = System.currentTimeMillis()
+                            val loaded = fallbackSnap.documents.mapNotNull { doc -> mapToAttendance(doc.id, doc.data) }
+                            replaceAttendanceScopeLocally(
+                                targetDate = today,
+                                jurusan = null,
+                                kelas = null,
+                                newRecords = loaded
+                            )
+                            onComplete?.invoke(_attendanceRecords.value)
+                        }
+                        .addOnFailureListener { innerErr ->
+                            _isLoadingRemote.value = false
+                            Log.w(TAG, "Fallback today attendance query failed: ${innerErr.message}")
+                            onComplete?.invoke(_attendanceRecords.value)
+                        }
+                } else {
+                    _isLoadingRemote.value = false
+                    onComplete?.invoke(_attendanceRecords.value)
+                }
+            }
+    }
+
+    /**
+     * 3. Jalur Terpisah untuk Rekap / Laporan 7 Hari (Sekali Ambil / .get(), BUKAN addSnapshotListener):
+     * Menggunakan filter whereGreaterThanOrEqualTo("dateString", sevenDaysAgoDateString)
+     * disertai filter kelas / jurusan bila tersedia (dengan fallback otomatis ke filter tanggal)
+     * dan hanya dipanggil saat halaman/tab rekap dibuka atau tombol refresh ditekan.
+     */
+    fun fetchSevenDayAttendanceRecap(
+        daysCount: Int = 7,
+        forceRefresh: Boolean = false,
+        jurusan: Jurusan? = null,
+        kelas: String? = null,
+        onComplete: ((List<AttendanceRecord>) -> Unit)? = null
+    ) {
+        val db = firestore ?: run {
+            onComplete?.invoke(_attendanceRecords.value)
+            return
+        }
+
+        val cleanKelas = kelas?.trim()?.takeIf { it.isNotEmpty() }
+        val sevenDaysAgoDateString = getDateStringDaysAgo((daysCount - 1).coerceAtLeast(1))
+        val fetchKey = "$sevenDaysAgoDateString|$daysCount|${jurusan?.name ?: "ALL"}|${cleanKelas ?: "ALL"}"
+        val dateRangePrefix = "$sevenDaysAgoDateString|$daysCount|"
+        val now = System.currentTimeMillis()
+        val isCacheFresh = (now - lastSevenDayRecapMillis) < RECAP_CACHE_COOLDOWN_MS
+        val isCoveredByCache = isCacheFresh && (
+            lastSevenDayRecapKey == fetchKey ||
+                (lastSevenDayRecapCoversAllScopes && lastSevenDayRecapKey?.startsWith(dateRangePrefix) == true)
+            )
+        if (!forceRefresh && isCoveredByCache) {
+            onComplete?.invoke(_sevenDayRecapRecords.value.ifEmpty { _attendanceRecords.value })
+            return
+        }
+
+        fun applyRecapResults(loaded: List<AttendanceRecord>, isFromServer: Boolean, scopedByFilter: Boolean) {
+            _isLoadingRemote.value = false
+            lastSevenDayRecapKey = if (scopedByFilter) fetchKey else "${dateRangePrefix}ALL|ALL"
+            lastSevenDayRecapCoversAllScopes = !scopedByFilter
+            lastSevenDayRecapMillis = System.currentTimeMillis()
+            _sevenDayRecapRecords.value = loaded
+            if (loaded.isNotEmpty() || isFromServer) {
+                val preserved = _attendanceRecords.value.filterNot { rec ->
+                    rec.dateString >= sevenDaysAgoDateString &&
+                        (!scopedByFilter || (jurusan == null || rec.jurusan == jurusan)) &&
+                        (!scopedByFilter || (cleanKelas == null || rec.kelas.equals(cleanKelas, ignoreCase = true)))
+                }
+                _attendanceRecords.value = mergeAttendanceById(preserved, loaded)
+            }
+            onComplete?.invoke(loaded)
+        }
+
+        var query: Query = db.collection("attendance_records")
+            .whereGreaterThanOrEqualTo("dateString", sevenDaysAgoDateString)
+        val isScoped = cleanKelas != null || jurusan != null
+        if (cleanKelas != null) {
+            query = query.whereEqualTo("kelas", cleanKelas)
+        } else if (jurusan != null) {
+            query = query.whereEqualTo("jurusan", jurusan.name)
+        }
+
+        _isLoadingRemote.value = true
+        query.get()
+            .addOnSuccessListener { snapshot ->
+                val loaded = snapshot.documents.mapNotNull { doc -> mapToAttendance(doc.id, doc.data) }
+                applyRecapResults(loaded, isFromServer = !snapshot.metadata.isFromCache, scopedByFilter = isScoped)
+            }
+            .addOnFailureListener { error ->
+                if (isScoped) {
+                    Log.w(TAG, "Scoped 7-day recap failed ($fetchKey), falling back to date range query: ${error.message}")
+                    db.collection("attendance_records")
+                        .whereGreaterThanOrEqualTo("dateString", sevenDaysAgoDateString)
+                        .get()
+                        .addOnSuccessListener { fallbackSnap ->
+                            val loaded = fallbackSnap.documents.mapNotNull { doc -> mapToAttendance(doc.id, doc.data) }
+                            applyRecapResults(loaded, isFromServer = !fallbackSnap.metadata.isFromCache, scopedByFilter = false)
+                        }
+                        .addOnFailureListener { innerErr ->
+                            _isLoadingRemote.value = false
+                            Log.w(TAG, "Fallback 7-day recap failed: ${innerErr.message}")
+                            onComplete?.invoke(_attendanceRecords.value)
+                        }
+                } else {
+                    _isLoadingRemote.value = false
+                    Log.w(TAG, "fetchSevenDayAttendanceRecap failed: ${error.message}")
+                    onComplete?.invoke(_attendanceRecords.value)
+                }
+            }
+    }
+
+    /**
+     * Pengambilan sekali jalan (.get()) untuk tanggal tertentu di luar rentang 7 hari (misal dari DatePicker).
+     */
+    fun fetchAttendanceForSpecificDateOnce(
+        dateString: String,
+        jurusan: Jurusan? = null,
+        kelas: String? = null,
+        onComplete: ((List<AttendanceRecord>) -> Unit)? = null
+    ) {
+        val db = firestore ?: run {
+            onComplete?.invoke(_attendanceRecords.value)
+            return
+        }
+
+        val cleanKelas = kelas?.trim()?.takeIf { it.isNotEmpty() }
+        var query: Query = db.collection("attendance_records")
+            .whereEqualTo("dateString", dateString)
+        if (cleanKelas != null) {
+            query = query.whereEqualTo("kelas", cleanKelas)
+        } else if (jurusan != null) {
+            query = query.whereEqualTo("jurusan", jurusan.name)
+        }
+
+        _isLoadingRemote.value = true
+        query.get()
+            .addOnSuccessListener { snapshot ->
+                _isLoadingRemote.value = false
+                val loaded = snapshot.documents.mapNotNull { doc -> mapToAttendance(doc.id, doc.data) }
+                replaceAttendanceScopeLocally(
+                    targetDate = dateString,
+                    jurusan = jurusan,
+                    kelas = cleanKelas,
+                    newRecords = loaded
+                )
+                onComplete?.invoke(loaded)
+            }
+            .addOnFailureListener { error ->
+                _isLoadingRemote.value = false
+                Log.w(TAG, "fetchAttendanceForSpecificDateOnce ($dateString) failed: ${error.message}")
+                onComplete?.invoke(_attendanceRecords.value)
+            }
+    }
+
+    /**
+     * Mengambil data halangan syar'i yang sedang aktif sekali jalan (.get()) untuk monitoring Guru/Admin.
+     */
+    fun fetchActivePeriodsOnce(forceRefresh: Boolean = false) {
+        val db = firestore ?: return
+        val now = System.currentTimeMillis()
+        if (!forceRefresh && (now - lastActivePeriodsFetchMillis) < CACHE_COOLDOWN_MS) {
+            return
+        }
+
+        db.collection("period_records")
+            .whereEqualTo("isActive", true)
+            .get()
+            .addOnSuccessListener { snapshot ->
+                lastActivePeriodsFetchMillis = System.currentTimeMillis()
+                val loaded = snapshot.documents.mapNotNull { doc -> mapToPeriod(doc.id, doc.data) }
+                if (loaded.isNotEmpty() || snapshot.metadata.isFromCache.not()) {
+                    val inactiveCached = _periodRecords.value.filterNot { it.isActive }
+                    _periodRecords.value = inactiveCached + loaded
+                }
+            }
+            .addOnFailureListener { error ->
+                Log.w(TAG, "fetchActivePeriodsOnce failed: ${error.message}")
+            }
+    }
+
+    /**
+     * 4A. Efisiensi Token QR (active_qr_tokens):
+     * Hanya mendengarkan SATU dokumen sesi sholat yang sedang aktif saja
+     * (active_qr_tokens/session_<prayerCode>), BUKAN seluruh koleksi.
+     */
+    fun observeActiveQrSession(prayerType: PrayerType = getCurrentActivePrayerSession()) {
+        val db = firestore ?: return
+        if (activeQrListener != null && listeningQrPrayer == prayerType) {
+            return
+        }
+
+        activeQrListener?.remove()
+        activeQrListener = null
+        listeningQrPrayer = prayerType
+
+        activeQrListener = db.collection("active_qr_tokens")
+            .document("session_${prayerType.code}")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Active QR session listener error (${prayerType.code}): ${error.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null && snapshot.exists()) {
+                    val today = getTodayDateString()
+                    val token = mapToQrToken(snapshot.data)
+                    if (token != null && token.dateString == today) {
+                        syncedRemoteQrDates[token.prayerType] = today
+                        _activeQrByPrayer.value = _activeQrByPrayer.value + (token.prayerType to token)
+                        _currentActiveQr.value = token
+                    }
+                }
+            }
+    }
+
+    /**
+     * 4B. Pembersihan Listener:
+     * Menutup (remove()) seluruh ListenerRegistration saat pengguna logout atau ViewModel dibersihkan (onCleared()).
+     */
+    fun clearListeners() {
+        studentAttendanceListener?.remove()
+        studentAttendanceListener = null
+
+        studentPeriodListener?.remove()
+        studentPeriodListener = null
+
+        activeQrListener?.remove()
+        activeQrListener = null
+        listeningQrPrayer = null
+
+        // Reset cache markers so next login performs a clean scoped fetch
+        lastUsersFetchKey = null
+        lastUsersFetchMillis = 0L
+        lastTodayAttendanceFetchKey = null
+        lastTodayAttendanceFetchMillis = 0L
+        lastSevenDayRecapKey = null
+        lastSevenDayRecapMillis = 0L
+        lastSevenDayRecapCoversAllScopes = false
+        lastActivePeriodsFetchMillis = 0L
+        syncedRemoteQrDates.clear()
+    }
+
+    /**
+     * Menentukan sesi sholat aktif saat ini berdasarkan jam perangkat (WITA):
+     * - < 10:30 : DHUHA
+     * - 10:30 - 14:29 : DZUHUR
+     * - >= 14:30 : ASHAR
+     */
+    fun getCurrentActivePrayerSession(): PrayerType {
+        val cal = Calendar.getInstance()
+        val hour = cal.get(Calendar.HOUR_OF_DAY)
+        val minute = cal.get(Calendar.MINUTE)
+        val totalMinutes = hour * 60 + minute
+        return when {
+            totalMinutes < 10 * 60 + 30 -> PrayerType.DHUHA
+            totalMinutes < 14 * 60 + 30 -> PrayerType.DZUHUR
+            else -> PrayerType.ASHAR
+        }
+    }
+
+    private fun upsertUsersLocally(incoming: List<UserProfile>) {
+        if (incoming.isEmpty()) return
+        _allUsers.value = mergeUsersById(_allUsers.value, incoming)
+    }
+
+    private fun mergeUsersById(base: List<UserProfile>, incoming: List<UserProfile>): List<UserProfile> {
+        val byId = LinkedHashMap<String, UserProfile>()
+        base.forEach { byId[it.id] = it }
+        incoming.forEach { byId[it.id] = it }
+        return byId.values.toList()
+    }
+
+    private fun mergeAttendanceById(
+        base: List<AttendanceRecord>,
+        incoming: List<AttendanceRecord>
+    ): List<AttendanceRecord> {
+        val byId = LinkedHashMap<String, AttendanceRecord>()
+        base.forEach { byId[it.id] = it }
+        incoming.forEach { byId[it.id] = it }
+        return byId.values.toList()
+    }
+
+    private fun replaceAttendanceScopeLocally(
+        targetDate: String,
+        jurusan: Jurusan?,
+        kelas: String?,
+        newRecords: List<AttendanceRecord>
+    ) {
+        val preserved = _attendanceRecords.value.filterNot { rec ->
+            rec.dateString == targetDate &&
+                (jurusan == null || rec.jurusan == jurusan) &&
+                (kelas == null || rec.kelas.equals(kelas, ignoreCase = true))
+        }
+        _attendanceRecords.value = mergeAttendanceById(preserved, newRecords)
+    }
+
+    // =========================================================================
+    // DATE & TIME UTILITIES
+    // =========================================================================
 
     fun getTodayDateString(): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -431,6 +929,10 @@ class AttendanceRepository(
         return sdf.format(Date())
     }
 
+    // =========================================================================
+    // QR CODE MANAGEMENT (SINGLE ACTIVE SESSION DOCUMENT)
+    // =========================================================================
+
     private fun createTokenForPrayer(prayerType: PrayerType, today: String): DynamicQrToken {
         // Distinct leading digit per prayer guarantees manual codes never collide across prayers
         val prayerPrefix = when (prayerType) {
@@ -463,25 +965,55 @@ class AttendanceRepository(
     }
 
     fun ensurePrayerQrPublished(prayerType: PrayerType): DynamicQrToken {
-        val token = getActiveQrFor(prayerType)
-        _currentActiveQr.value = token
-        firestore?.collection("active_qr_tokens")?.document("session_${prayerType.code}")?.set(qrTokenToMap(token))
-            ?.addOnFailureListener { Log.w("AttendanceRepo", "Failed to publish QR token to Firestore: ${it.message}") }
-        return token
+        // Switch single-document QR listener to this active prayer session
+        observeActiveQrSession(prayerType)
+        val today = getTodayDateString()
+        val localToken = getActiveQrFor(prayerType)
+        _currentActiveQr.value = localToken
+
+        // Hemat kuota Spark Plan: jangan menimpa dokumen QR yang sudah aktif hari ini di Firestore
+        // agar tidak memicu fan-out read ke 1.500 HP siswa setiap kali guru membuka layar QR.
+        if (syncedRemoteQrDates[prayerType] == today) {
+            return localToken
+        }
+
+        val docRef = firestore?.collection("active_qr_tokens")?.document("session_${prayerType.code}")
+        docRef?.get()
+            ?.addOnSuccessListener { snapshot ->
+                val remoteToken = if (snapshot.exists()) mapToQrToken(snapshot.data) else null
+                if (remoteToken != null && remoteToken.dateString == today) {
+                    syncedRemoteQrDates[prayerType] = today
+                    _activeQrByPrayer.value = _activeQrByPrayer.value + (prayerType to remoteToken)
+                    _currentActiveQr.value = remoteToken
+                } else {
+                    syncedRemoteQrDates[prayerType] = today
+                    docRef.set(qrTokenToMap(localToken))
+                        .addOnFailureListener { Log.w(TAG, "Failed to publish QR token to Firestore: ${it.message}") }
+                }
+            }
+            ?.addOnFailureListener { Log.w(TAG, "Failed to check active QR token in Firestore: ${it.message}") }
+        return localToken
     }
 
     fun generateNewDynamicQr(prayerType: PrayerType): DynamicQrToken {
+        // Switch single-document QR listener to this active prayer session
+        observeActiveQrSession(prayerType)
         val today = getTodayDateString()
         val token = createTokenForPrayer(prayerType, today)
+        syncedRemoteQrDates[prayerType] = today
         _activeQrByPrayer.value = _activeQrByPrayer.value + (prayerType to token)
         _currentActiveQr.value = token
 
         // Write to Cloud Firestore under prayer-specific document
         firestore?.collection("active_qr_tokens")?.document("session_${prayerType.code}")?.set(qrTokenToMap(token))
-            ?.addOnFailureListener { Log.w("AttendanceRepo", "Failed to sync QR token to Firestore: ${it.message}") }
+            ?.addOnFailureListener { Log.w(TAG, "Failed to sync QR token to Firestore: ${it.message}") }
 
         return token
     }
+
+    // =========================================================================
+    // ATTENDANCE SCAN & WRITE OPERATIONS (INCLUDES studentId FOR SCOPED QUERIES)
+    // =========================================================================
 
     sealed class ScanResult {
         data class Success(
@@ -503,7 +1035,7 @@ class AttendanceRepository(
         val cleanInput = inputCode.trim()
         val today = getTodayDateString()
 
-        // 1. Check 4-6 digit manual code across ALL active prayer sessions for today
+        // 1. Check 4-6 digit manual code against active prayer session token
         if (cleanInput.length in 4..6 && cleanInput.all { it.isDigit() }) {
             val matchedToken = _activeQrByPrayer.value.values.find {
                 it.dateString == today && it.shortEntryCode.equals(cleanInput, ignoreCase = true)
@@ -512,6 +1044,16 @@ class AttendanceRepository(
             }
             if (matchedToken != null) {
                 return recordStudentAttendance(student, matchedToken.prayerType, today)
+            }
+            // If prefix points to a different prayer session, switch single-doc QR listener to fetch latest code
+            val targetPrayer = when (cleanInput.firstOrNull()) {
+                '1' -> PrayerType.DHUHA
+                '2' -> PrayerType.DZUHUR
+                '3' -> PrayerType.ASHAR
+                else -> null
+            }
+            if (targetPrayer != null && targetPrayer != listeningQrPrayer) {
+                observeActiveQrSession(targetPrayer)
             }
             return ScanResult.InvalidQr("Kode sesi '$cleanInput' tidak cocok dengan sesi sholat aktif hari ini.")
         }
@@ -538,16 +1080,17 @@ class AttendanceRepository(
     private fun recordStudentAttendance(student: UserProfile, prayerType: PrayerType, today: String): ScanResult {
         val existing = _attendanceRecords.value.find {
             it.nisn == student.nisnOrNip &&
-            it.dateString == today &&
-            it.prayerType == prayerType
+                it.dateString == today &&
+                it.prayerType == prayerType
         }
 
         if (existing != null) {
             return ScanResult.AlreadyScanned(prayerType, existing.formattedTime)
         }
 
+        val deterministicDocId = "${student.id}_${today}_${prayerType.code}"
         val newRecord = AttendanceRecord(
-            id = UUID.randomUUID().toString(),
+            id = deterministicDocId,
             nisn = student.nisnOrNip,
             studentName = student.fullName,
             jurusan = student.jurusan ?: Jurusan.PPLG,
@@ -561,11 +1104,13 @@ class AttendanceRepository(
             dhuhaStatus = DhuhaStatus.HADIR
         )
 
-        _attendanceRecords.value = _attendanceRecords.value + newRecord
+        _attendanceRecords.value = mergeAttendanceById(_attendanceRecords.value, listOf(newRecord))
 
-        // Push new attendance record to Firestore
-        firestore?.collection("attendance_records")?.document(newRecord.id)?.set(attendanceToMap(newRecord))
-            ?.addOnFailureListener { Log.w("AttendanceRepo", "Failed to sync attendance to Firestore: ${it.message}") }
+        // Push new attendance record to Firestore (includes studentId for SISWA scoped listener)
+        firestore?.collection("attendance_records")
+            ?.document(newRecord.id)
+            ?.set(attendanceToMap(newRecord, studentId = student.id))
+            ?.addOnFailureListener { Log.w(TAG, "Failed to sync attendance to Firestore: ${it.message}") }
 
         val todayRecords = _attendanceRecords.value.filter {
             it.nisn == student.nisnOrNip && it.dateString == today
@@ -586,21 +1131,33 @@ class AttendanceRepository(
         val today = getTodayDateString()
         val existing = _attendanceRecords.value.find {
             it.nisn == student.nisnOrNip &&
-            it.dateString == today &&
-            it.prayerType == PrayerType.DHUHA
+                it.dateString == today &&
+                it.prayerType == PrayerType.DHUHA
         }
 
         val status = if (isPresent) DhuhaStatus.HADIR else DhuhaStatus.TIDAK_HADIR
 
         if (existing != null) {
-            val updated = existing.copy(dhuhaStatus = status)
+            val updated = existing.copy(
+                dhuhaStatus = status,
+                isVerifiedInMosque = isPresent
+            )
             _attendanceRecords.value = _attendanceRecords.value.map {
                 if (it.id == existing.id) updated else it
             }
-            firestore?.collection("attendance_records")?.document(existing.id)?.update("dhuhaStatus", status.name)
+            firestore?.collection("attendance_records")?.document(existing.id)
+                ?.update(
+                    mapOf(
+                        "studentId" to student.id,
+                        "dhuhaStatus" to status.name,
+                        "isVerifiedInMosque" to isPresent
+                    )
+                )
+                ?.addOnFailureListener { Log.w(TAG, "Failed to update Dhuha status in Firestore: ${it.message}") }
         } else {
+            val deterministicDocId = "${student.id}_${today}_${PrayerType.DHUHA.code}"
             val newRecord = AttendanceRecord(
-                id = UUID.randomUUID().toString(),
+                id = deterministicDocId,
                 nisn = student.nisnOrNip,
                 studentName = student.fullName,
                 jurusan = student.jurusan ?: Jurusan.PPLG,
@@ -613,12 +1170,17 @@ class AttendanceRepository(
                 isHalanganSyari = false,
                 dhuhaStatus = status
             )
-            _attendanceRecords.value = _attendanceRecords.value + newRecord
-            firestore?.collection("attendance_records")?.document(newRecord.id)?.set(attendanceToMap(newRecord))
+            _attendanceRecords.value = mergeAttendanceById(_attendanceRecords.value, listOf(newRecord))
+            firestore?.collection("attendance_records")
+                ?.document(newRecord.id)
+                ?.set(attendanceToMap(newRecord, studentId = student.id))
+                ?.addOnFailureListener { Log.w(TAG, "Failed to save Dhuha choice in Firestore: ${it.message}") }
         }
     }
 
-    // --- HALANGAN SYAR'I (PERIOD LOGIC FOR FEMALE STUDENTS) ---
+    // =========================================================================
+    // HALANGAN SYAR'I (PERIOD LOGIC FOR FEMALE STUDENTS)
+    // =========================================================================
 
     fun getActivePeriodRecord(nisn: String): PeriodRecord? {
         val now = System.currentTimeMillis()
@@ -664,26 +1226,37 @@ class AttendanceRepository(
             isManuallyEnded = false,
             notes = notes
         )
-        // Deactivate previous active records for this student
+        // Deactivate previous active records for this student locally and in Firestore
+        val previouslyActive = _periodRecords.value.filter { it.nisn == student.nisnOrNip && it.isActive }
         val updated = _periodRecords.value.map {
             if (it.nisn == student.nisnOrNip) it.copy(isActive = false) else it
         } + newRecord
         _periodRecords.value = updated
 
         // Push to Cloud Firestore
-        firestore?.collection("period_records")?.document(newRecord.id)?.set(periodToMap(newRecord))
+        firestore?.let { db ->
+            previouslyActive.forEach { oldRec ->
+                db.collection("period_records").document(oldRec.id)
+                    .update("isActive", false)
+                    .addOnFailureListener { Log.w(TAG, "Failed to deactivate old period in Firestore: ${it.message}") }
+            }
+            db.collection("period_records").document(newRecord.id).set(periodToMap(newRecord))
+                .addOnFailureListener { Log.w(TAG, "Failed to save period report in Firestore: ${it.message}") }
+        }
     }
 
     // End period (Suci / Mandi Wajib done, ready to pray)
     fun reportPeriodEnd(nisn: String) {
-        val target = _periodRecords.value.find { it.nisn == nisn && it.isActive }
+        val activeTargets = _periodRecords.value.filter { it.nisn == nisn && it.isActive }
         _periodRecords.value = _periodRecords.value.map {
             if (it.nisn == nisn && it.isActive) it.copy(isActive = false, isManuallyEnded = true) else it
         }
-        target?.let {
-            firestore?.collection("period_records")?.document(it.id)?.update(
-                mapOf("isActive" to false, "isManuallyEnded" to true)
-            )
+        firestore?.let { db ->
+            activeTargets.forEach { target ->
+                db.collection("period_records").document(target.id)
+                    .update(mapOf("isActive" to false, "isManuallyEnded" to true))
+                    .addOnFailureListener { Log.w(TAG, "Failed to end period in Firestore: ${it.message}") }
+            }
         }
     }
 
@@ -723,8 +1296,8 @@ class AttendanceRepository(
         val today = getTodayDateString()
         return _attendanceRecords.value.any {
             it.nisn == nisn &&
-            it.dateString == today &&
-            it.prayerType == prayerType
+                it.dateString == today &&
+                it.prayerType == prayerType
         }
     }
 
@@ -743,7 +1316,9 @@ class AttendanceRepository(
         return hasDzuhur && hasAshar
     }
 
-    // --- REGISTRASI SISWA MANDIRI ---
+    // =========================================================================
+    // USER MANAGEMENT (REGISTER, ADD TEACHER, QUALIFICATION, PASSWORD, DELETE)
+    // =========================================================================
 
     fun registerStudent(
         fullName: String,
@@ -783,12 +1358,10 @@ class AttendanceRepository(
 
         // Sync new student account to Cloud Firestore
         firestore?.collection("users")?.document(newStudent.id)?.set(userToMap(newStudent))
-            ?.addOnFailureListener { Log.w("AttendanceRepo", "Failed to sync student to Firestore: ${it.message}") }
+            ?.addOnFailureListener { Log.w(TAG, "Failed to sync student to Firestore: ${it.message}") }
 
         return Result.success(newStudent)
     }
-
-    // --- ADMIN PUSAT: TAMBAH AKUN GURU & RESET PASSWORD ---
 
     fun addTeacher(
         nipOrUsername: String,
@@ -830,7 +1403,7 @@ class AttendanceRepository(
 
         // Sync new teacher to Cloud Firestore
         firestore?.collection("users")?.document(newTeacher.id)?.set(userToMap(newTeacher))
-            ?.addOnFailureListener { Log.w("AttendanceRepo", "Failed to sync teacher to Firestore: ${it.message}") }
+            ?.addOnFailureListener { Log.w(TAG, "Failed to sync teacher to Firestore: ${it.message}") }
 
         return Result.success(newTeacher)
     }
@@ -842,6 +1415,9 @@ class AttendanceRepository(
     ): UserProfile? {
         val existing = _allUsers.value.find { it.id == userId } ?: return null
         val cleanKelas = kelas?.trim()?.ifEmpty { null }
+        if (existing.jurusan == jurusan && existing.kelas == cleanKelas) {
+            return existing
+        }
         val updated = existing.copy(
             jurusan = jurusan,
             kelas = cleanKelas
@@ -855,7 +1431,7 @@ class AttendanceRepository(
                 "kelas" to cleanKelas
             )
         )?.addOnFailureListener {
-            Log.w("AttendanceRepo", "Failed to update teacher qualification in Firestore: ${it.message}")
+            Log.w(TAG, "Failed to update teacher qualification in Firestore: ${it.message}")
         }
         return updated
     }
@@ -885,7 +1461,7 @@ class AttendanceRepository(
 
         // Sync password update to Cloud Firestore
         firestore?.collection("users")?.document(found.id)?.update("password", cleanPassword)
-            ?.addOnFailureListener { Log.w("AttendanceRepo", "Failed to update password in Firestore: ${it.message}") }
+            ?.addOnFailureListener { Log.w(TAG, "Failed to update password in Firestore: ${it.message}") }
 
         return true
     }
@@ -898,8 +1474,19 @@ class AttendanceRepository(
 
         // Lindungi akun Admin Pusat dari penghapusan tidak sengaja
         if (userToDelete.role == Role.ADMIN_PUSAT) {
-            Log.w("AttendanceRepo", "Akun Admin Pusat tidak dapat dihapus.")
+            Log.w(TAG, "Akun Admin Pusat tidak dapat dihapus.")
             return false
+        }
+
+        val attendanceToDelete = if (userToDelete.role == Role.SISWA) {
+            _attendanceRecords.value.filter { it.nisn == userToDelete.nisnOrNip }
+        } else {
+            emptyList()
+        }
+        val periodToDelete = if (userToDelete.role == Role.SISWA) {
+            _periodRecords.value.filter { it.nisn == userToDelete.nisnOrNip }
+        } else {
+            emptyList()
         }
 
         // Hapus dari state lokal
@@ -911,48 +1498,78 @@ class AttendanceRepository(
             _periodRecords.value = _periodRecords.value.filter { it.nisn != userToDelete.nisnOrNip }
         }
 
-        // Sinkronkan penghapusan ke Cloud Firestore
-        firestore?.collection("users")?.document(targetUserId)?.delete()
-            ?.addOnFailureListener { Log.w("AttendanceRepo", "Gagal menghapus user di Firestore: ${it.message}") }
+        // Sinkronkan penghapusan ke Cloud Firestore (user + riwayat absensi & halangan terkait)
+        firestore?.let { db ->
+            db.collection("users").document(targetUserId).delete()
+                .addOnFailureListener { Log.w(TAG, "Gagal menghapus user di Firestore: ${it.message}") }
+            attendanceToDelete.forEach { rec ->
+                db.collection("attendance_records").document(rec.id).delete()
+                    .addOnFailureListener { Log.w(TAG, "Gagal menghapus absensi siswa di Firestore: ${it.message}") }
+            }
+            periodToDelete.forEach { rec ->
+                db.collection("period_records").document(rec.id).delete()
+                    .addOnFailureListener { Log.w(TAG, "Gagal menghapus data halangan siswa di Firestore: ${it.message}") }
+            }
+        }
 
         return true
     }
 
     /**
-     * Admin Pusat: Hapus massal seluruh akun berdasarkan peran (GURU atau SISWA)
+     * Admin Pusat: Hapus massal seluruh akun berdasarkan Role (Hanya SISWA atau ADMIN_GURU)
      */
     fun deleteBulkUsers(roleToDelete: Role): Int {
-        if (roleToDelete == Role.ADMIN_PUSAT) return 0
+        if (roleToDelete == Role.ADMIN_PUSAT) {
+            Log.w(TAG, "Penghapusan massal Admin Pusat tidak diizinkan.")
+            return 0
+        }
 
-        val toRemove = _allUsers.value.filter { it.role == roleToDelete }
-        if (toRemove.isEmpty()) return 0
+        val targets = _allUsers.value.filter { it.role == roleToDelete }
+        if (targets.isEmpty()) return 0
 
-        _allUsers.value = _allUsers.value.filter { it.role != roleToDelete }
+        val targetIds = targets.map { it.id }.toSet()
+        val targetNisns = targets.map { it.nisnOrNip }.toSet()
+        val attendanceToDelete = if (roleToDelete == Role.SISWA) {
+            _attendanceRecords.value.filter { it.nisn in targetNisns }
+        } else {
+            emptyList()
+        }
+        val periodToDelete = if (roleToDelete == Role.SISWA) {
+            _periodRecords.value.filter { it.nisn in targetNisns }
+        } else {
+            emptyList()
+        }
 
+        // Hapus dari state lokal
+        _allUsers.value = _allUsers.value.filter { it.id !in targetIds }
+
+        // Jika menghapus seluruh siswa, bersihkan juga data presensi dan halangan syar'i terkait
         if (roleToDelete == Role.SISWA) {
-            _attendanceRecords.value = emptyList()
-            _periodRecords.value = emptyList()
+            _attendanceRecords.value = _attendanceRecords.value.filter { it.nisn !in targetNisns }
+            _periodRecords.value = _periodRecords.value.filter { it.nisn !in targetNisns }
         }
 
-        // Hapus dari Cloud Firestore
+        // Hapus massal di Firestore menggunakan WriteBatch (maksimal 450 dokumen per batch)
         firestore?.let { db ->
-            toRemove.forEach { u ->
-                db.collection("users").document(u.id).delete()
+            val refsToDelete = buildList {
+                targets.forEach { user -> add(db.collection("users").document(user.id)) }
+                attendanceToDelete.forEach { rec -> add(db.collection("attendance_records").document(rec.id)) }
+                periodToDelete.forEach { rec -> add(db.collection("period_records").document(rec.id)) }
             }
-            if (roleToDelete == Role.SISWA) {
-                db.collection("attendance_records").get().addOnSuccessListener { snapshot ->
-                    snapshot.documents.forEach { it.reference.delete() }
-                }
-                db.collection("period_records").get().addOnSuccessListener { snapshot ->
-                    snapshot.documents.forEach { it.reference.delete() }
-                }
+            refsToDelete.chunked(450).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { ref -> batch.delete(ref) }
+                batch.commit()
+                    .addOnFailureListener { Log.w(TAG, "Gagal hapus massal batch di Firestore: ${it.message}") }
             }
         }
 
-        return toRemove.size
+        return targets.size
     }
 
-    // --- FIRESTORE MAP SERIALIZERS & DESERIALIZERS ---
+    // =========================================================================
+    // FIRESTORE MAPPING HELPERS
+    // =========================================================================
 
     private fun userToMap(u: UserProfile): Map<String, Any?> = mapOf(
         "id" to u.id,
@@ -990,20 +1607,26 @@ class AttendanceRepository(
         )
     }
 
-    private fun attendanceToMap(a: AttendanceRecord): Map<String, Any?> = mapOf(
-        "id" to a.id,
-        "nisn" to a.nisn,
-        "studentName" to a.studentName,
-        "jurusan" to a.jurusan.name,
-        "kelas" to a.kelas,
-        "prayerType" to a.prayerType.name,
-        "dateString" to a.dateString,
-        "timestampMillis" to a.timestampMillis,
-        "formattedTime" to a.formattedTime,
-        "isVerifiedInMosque" to a.isVerifiedInMosque,
-        "isHalanganSyari" to a.isHalanganSyari,
-        "dhuhaStatus" to a.dhuhaStatus.name
-    )
+    private fun attendanceToMap(a: AttendanceRecord, studentId: String? = null): Map<String, Any?> {
+        val resolvedStudentId = studentId
+            ?: _allUsers.value.find { it.nisnOrNip == a.nisn }?.id
+            ?: a.nisn
+        return mapOf(
+            "id" to a.id,
+            "studentId" to resolvedStudentId,
+            "nisn" to a.nisn,
+            "studentName" to a.studentName,
+            "jurusan" to a.jurusan.name,
+            "kelas" to a.kelas,
+            "prayerType" to a.prayerType.name,
+            "dateString" to a.dateString,
+            "timestampMillis" to a.timestampMillis,
+            "formattedTime" to a.formattedTime,
+            "isVerifiedInMosque" to a.isVerifiedInMosque,
+            "isHalanganSyari" to a.isHalanganSyari,
+            "dhuhaStatus" to a.dhuhaStatus.name
+        )
+    }
 
     private fun mapToAttendance(docId: String, data: Map<String, Any?>?): AttendanceRecord? {
         if (data == null) return null

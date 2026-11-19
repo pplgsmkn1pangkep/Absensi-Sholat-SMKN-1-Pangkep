@@ -2,7 +2,7 @@ package com.example.model
 
 enum class Role(val title: String) {
     ADMIN_PUSAT("Admin Pusat (Kepala Sekolah & Operator)"),
-    ADMIN_GURU("Admin Guru (Guru Agama / Wali Kelas / Kaprodi)"),
+    ADMIN_GURU("Kaprodi / Wali Kelas / Guru BK / Guru Agama"),
     SISWA("Siswa")
 }
 
@@ -134,6 +134,7 @@ data class UserProfile(
             lower.startsWith("kaprodi") ||
             lower.startsWith("piket") ||
             lower.startsWith("guru") ||
+            lower.startsWith("bk") ||
             lower.startsWith("semua")
         ) {
             return null
@@ -142,15 +143,39 @@ data class UserProfile(
     }
 
     fun effectiveJabatanLabel(): String {
-        jabatan?.takeIf { it.isNotBlank() }?.let { return it }
+        jabatan?.takeIf { it.isNotBlank() }?.let { rawJabatan ->
+            val lower = rawJabatan.lowercase()
+            return when {
+                lower.contains("kaprodi") -> "Kaprodi"
+                lower.contains("wali") -> "Wali Kelas"
+                lower.contains("bk") -> "Guru BK"
+                lower.contains("agama") || lower.contains("piket") -> "Guru Agama"
+                else -> rawJabatan
+            }
+        }
         val lowerName = fullName.lowercase()
         val lowerKelas = kelas?.lowercase().orEmpty()
         return when {
             lowerName.contains("kaprodi") || lowerKelas.startsWith("kaprodi") -> "Kaprodi"
+            lowerName.contains("bk") || lowerKelas.startsWith("bk") || lowerKelas.contains("guru bk") -> "Guru BK"
             effectiveKelasFilter() != null -> "Wali Kelas"
-            lowerName.contains("agama") || lowerKelas.startsWith("piket") -> "Guru Agama / Piket"
-            else -> "Guru"
+            lowerName.contains("agama") || lowerKelas.startsWith("piket") -> "Guru Agama"
+            else -> "Guru Agama"
         }
+    }
+
+    fun isKaprodi(): Boolean =
+        role == Role.ADMIN_GURU && effectiveJabatanLabel().equals("Kaprodi", ignoreCase = true)
+
+    fun isWaliKelas(): Boolean =
+        role == Role.ADMIN_GURU && effectiveJabatanLabel().equals("Wali Kelas", ignoreCase = true)
+
+    fun isRestrictedToAssignedScope(): Boolean = isKaprodi() || isWaliKelas()
+
+    fun isScopeLocked(): Boolean = when {
+        isWaliKelas() -> jurusan != null && effectiveKelasFilter() != null
+        isKaprodi() -> jurusan != null
+        else -> false
     }
 }
 

@@ -45,6 +45,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -111,18 +112,21 @@ fun LoginScreen(
 
     fun getRoleKey(roleIdx: Int): String = when (roleIdx) {
         0 -> "siswa"
-        1 -> "guru"
+        1 -> "kaprodi"
+        2 -> "wali_kelas"
+        3 -> "guru_bk"
+        4 -> "guru_agama"
         else -> "admin"
     }
 
-    // Restore last selected role (default to 0: Siswa)
-    val savedRoleIndex = remember { authPrefs.getInt("last_role_index", 0).coerceIn(0, 2) }
+    // Restore last selected account type (0: Siswa, 1: Kaprodi, 2: Wali Kelas, 3: Guru BK, 4: Guru Agama, 5: Admin Pusat)
+    val savedRoleIndex = remember { authPrefs.getInt("last_role_index", 0).coerceIn(0, 5) }
     var selectedRoleIndex by remember { mutableIntStateOf(savedRoleIndex) }
 
     val targetRole = when (selectedRoleIndex) {
         0 -> Role.SISWA
-        1 -> Role.ADMIN_GURU
-        else -> Role.ADMIN_PUSAT
+        5 -> Role.ADMIN_PUSAT
+        else -> Role.ADMIN_GURU
     }
 
     // Sub-mode for Siswa: 0 = Masuk (Login), 1 = Daftar Akun Baru (Register)
@@ -149,6 +153,7 @@ fun LoginScreen(
     var usernameOrNisn by remember { mutableStateOf(initialUser) }
     var password by remember { mutableStateOf(initialPass) }
     var isPasswordVisible by remember { mutableStateOf(false) }
+    var isLoggingIn by remember { mutableStateOf(false) }
 
     // Guru / Kaprodi qualification override on login
     var guruSelectedJurusan by remember { mutableStateOf<Jurusan?>(null) }
@@ -317,7 +322,7 @@ fun LoginScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Role Selector Tabs (Siswa, Admin Guru, Admin Pusat) - Compact Inline
+        // Account Type Selector (Siswa, Kaprodi, Wali Kelas, Guru BK, Guru Agama, Admin Pusat)
         Surface(
             shape = RoundedCornerShape(14.dp),
             color = CreamCardBg,
@@ -326,83 +331,116 @@ fun LoginScreen(
                 .fillMaxWidth()
                 .widthIn(max = 480.dp)
         ) {
-            TabRow(
-                selectedTabIndex = selectedRoleIndex,
-                containerColor = Color.Transparent,
-                indicator = { tabPositions ->
-                    TabRowDefaults.SecondaryIndicator(
-                        Modifier.tabIndicatorOffset(tabPositions[selectedRoleIndex]),
-                        color = ScanGreenPrimary,
-                        height = 3.dp
-                    )
-                }
+            val accountOptions = listOf(
+                Triple(0, "Siswa", Icons.Default.School),
+                Triple(1, "Kaprodi", Icons.Default.AccountCircle),
+                Triple(2, "Wali Kelas", Icons.Default.Badge),
+                Triple(3, "Guru BK", Icons.Default.Person),
+                Triple(4, "Guru Agama", Icons.Default.Mosque),
+                Triple(5, "Admin Pusat", Icons.Default.SupervisorAccount)
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Tab(
-                    selected = selectedRoleIndex == 0,
-                    onClick = { onTabChanged(0) },
-                    modifier = Modifier.height(42.dp),
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.School,
-                                contentDescription = null,
-                                tint = if (selectedRoleIndex == 0) ScanGreenPrimary else Color(0xFF6B584E),
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Siswa",
-                                fontWeight = if (selectedRoleIndex == 0) FontWeight.ExtraBold else FontWeight.Bold,
-                                color = if (selectedRoleIndex == 0) ScanGreenPrimary else Color(0xFF6B584E),
-                                fontSize = 11.5.sp
-                            )
+                // Row 1: Siswa, Kaprodi, Wali Kelas
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    accountOptions.take(3).forEach { (idx, label, icon) ->
+                        val isSelected = selectedRoleIndex == idx
+                        val activeColor = if (idx == 0) ScanGreenPrimary else BrownPrimary
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) activeColor else Color.White,
+                            border = androidx.compose.foundation.BorderStroke(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) activeColor else CreamCardBorder
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onTabChanged(idx) }
+                                .testTag("login_account_tab_$idx")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = label,
+                                    tint = if (isSelected) Color.White else Color(0xFF6B584E),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = label,
+                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold,
+                                    color = if (isSelected) Color.White else Color(0xFF6B584E),
+                                    fontSize = 10.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
-                )
-                Tab(
-                    selected = selectedRoleIndex == 1,
-                    onClick = { onTabChanged(1) },
-                    modifier = Modifier.height(42.dp),
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Person,
-                                contentDescription = null,
-                                tint = if (selectedRoleIndex == 1) BrownPrimary else Color(0xFF6B584E),
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Guru",
-                                fontWeight = if (selectedRoleIndex == 1) FontWeight.ExtraBold else FontWeight.Bold,
-                                color = if (selectedRoleIndex == 1) BrownDark else Color(0xFF6B584E),
-                                fontSize = 11.5.sp
-                            )
+                }
+                // Row 2: Guru BK, Guru Agama, Admin Pusat
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    accountOptions.drop(3).forEach { (idx, label, icon) ->
+                        val isSelected = selectedRoleIndex == idx
+                        val activeColor = if (idx == 5) BrownDark else BrownPrimary
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) activeColor else Color.White,
+                            border = androidx.compose.foundation.BorderStroke(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) activeColor else CreamCardBorder
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onTabChanged(idx) }
+                                .testTag("login_account_tab_$idx")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = label,
+                                    tint = if (isSelected) Color.White else Color(0xFF6B584E),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = label,
+                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold,
+                                    color = if (isSelected) Color.White else Color(0xFF6B584E),
+                                    fontSize = 10.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
-                )
-                Tab(
-                    selected = selectedRoleIndex == 2,
-                    onClick = { onTabChanged(2) },
-                    modifier = Modifier.height(42.dp),
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.SupervisorAccount,
-                                contentDescription = null,
-                                tint = if (selectedRoleIndex == 2) BrownPrimary else Color(0xFF6B584E),
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Admin",
-                                fontWeight = if (selectedRoleIndex == 2) FontWeight.ExtraBold else FontWeight.Bold,
-                                color = if (selectedRoleIndex == 2) BrownDark else Color(0xFF6B584E),
-                                fontSize = 11.5.sp
-                            )
-                        }
-                    }
-                )
+                }
             }
         }
 
@@ -702,8 +740,11 @@ fun LoginScreen(
                     Text(
                         text = when (selectedRoleIndex) {
                             0 -> "Masuk Sebagai Siswa"
-                            1 -> "Masuk Sebagai Guru / Kaprodi"
-                            else -> "Masuk Sebagai Admin Pusat / Kepsek"
+                            1 -> "Masuk Sebagai Kaprodi"
+                            2 -> "Masuk Sebagai Wali Kelas"
+                            3 -> "Masuk Sebagai Guru BK"
+                            4 -> "Masuk Sebagai Guru Agama"
+                            else -> "Masuk Sebagai Admin Pusat"
                         },
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
@@ -713,8 +754,11 @@ fun LoginScreen(
                     Text(
                         text = when (selectedRoleIndex) {
                             0 -> "Gunakan NISN dan kata sandi Anda yang terdaftar"
-                            1 -> "Guru Agama, Wali Kelas & Kaprodi (terkualifikasi per jurusan)"
-                            else -> "Kepala Sekolah & Operator Administrasi Sekolah"
+                            1 -> "Pemantauan sholat siswa seluruh kelas pada jurusan yang diampu"
+                            2 -> "Pemantauan sholat siswa pada jurusan & kelas binaan Anda"
+                            3 -> "Pemantauan pembinaan & kedisiplinan sholat siswa"
+                            4 -> "Pemantauan sholat berjamaah & verifikasi ibadah siswa"
+                            else -> "Kontrol penuh seluruh akun, reset sandi & pemantauan 7 jurusan"
                         },
                         fontSize = 11.sp,
                         color = Color.Gray,
@@ -783,8 +827,8 @@ fun LoginScreen(
                         )
                     )
 
-                    // Guru / Kaprodi Jurusan & Kelas Qualification Selector
-                    if (selectedRoleIndex == 1) {
+                    // Qualification Selector for Kaprodi, Wali Kelas, Guru BK, and Guru Agama
+                    if (selectedRoleIndex in 1..4) {
                         Spacer(modifier = Modifier.height(12.dp))
                         Surface(
                             shape = RoundedCornerShape(12.dp),
@@ -800,7 +844,12 @@ fun LoginScreen(
                                     color = BrownDark
                                 )
                                 Text(
-                                    text = "Pilih jurusan/kelas Anda agar hanya memantau siswa yang Anda ampu",
+                                    text = when (selectedRoleIndex) {
+                                        1 -> "Pilih jurusan/kelas yang Anda ampu sebagai Kaprodi (dikunci setelah masuk)"
+                                        2 -> "Pilih jurusan & 1 kelas binaan Anda sebagai Wali Kelas (dikunci setelah masuk)"
+                                        3 -> "Pilih jurusan/kelas siswa binaan Guru BK (opsional)"
+                                        else -> "Pilih jurusan/kelas siswa yang Anda ampu sebagai Guru Agama (opsional)"
+                                    },
                                     fontSize = 10.sp,
                                     color = Color.Gray
                                 )
@@ -828,7 +877,8 @@ fun LoginScreen(
                                             selected = guruSelectedJurusan == jur,
                                             onClick = {
                                                 guruSelectedJurusan = jur
-                                                guruSelectedKelas = null
+                                                val classes = viewModel.repository.getKnownClassesForJurusan(jur)
+                                                guruSelectedKelas = if (selectedRoleIndex == 2) classes.firstOrNull() else null
                                             },
                                             label = { Text(jur.code, fontSize = 11.sp) },
                                             colors = FilterChipDefaults.filterChipColors(
@@ -846,7 +896,11 @@ fun LoginScreen(
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(
-                                        text = "Pilih Kelas (opsional untuk Wali Kelas):",
+                                        text = when (selectedRoleIndex) {
+                                            2 -> "Pilih Kelas Binaan Wali Kelas (wajib pilih 1 kelas):"
+                                            1 -> "Pilih Kelas Spesifik atau Semua Kelas Jurusan ${guruSelectedJurusan?.code}:"
+                                            else -> "Pilih Kelas (opsional):"
+                                        },
                                         fontSize = 10.5.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = BrownMedium
@@ -857,15 +911,17 @@ fun LoginScreen(
                                             .horizontalScroll(rememberScrollState()),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        FilterChip(
-                                            selected = guruSelectedKelas == null,
-                                            onClick = { guruSelectedKelas = null },
-                                            label = { Text("Semua Kelas ${guruSelectedJurusan?.code}", fontSize = 10.5.sp) },
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = BrownPrimary,
-                                                selectedLabelColor = Color.White
+                                        if (selectedRoleIndex != 2) {
+                                            FilterChip(
+                                                selected = guruSelectedKelas == null,
+                                                onClick = { guruSelectedKelas = null },
+                                                label = { Text("Semua Kelas ${guruSelectedJurusan?.code}", fontSize = 10.5.sp) },
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = BrownPrimary,
+                                                    selectedLabelColor = Color.White
+                                                )
                                             )
-                                        )
+                                        }
                                         classesForJurusan.forEach { cls ->
                                             FilterChip(
                                                 selected = guruSelectedKelas == cls,
@@ -951,39 +1007,56 @@ fun LoginScreen(
 
                     Button(
                         onClick = {
+                            if (isLoggingIn) return@Button
                             if (usernameOrNisn.isBlank() || password.isBlank()) {
                                 Toast.makeText(context, "Silakan isi NISN/Username dan Kata Sandi.", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
-                            val success = viewModel.login(
-                                usernameOrNisn = usernameOrNisn,
+                            if (selectedRoleIndex == 2 && guruSelectedJurusan != null && guruSelectedKelas.isNullOrBlank()) {
+                                Toast.makeText(context, "Wali Kelas wajib memilih 1 kelas binaan terlebih dahulu.", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val isStaffRole = selectedRoleIndex in 1..4
+                            val jurusanOverride = if (isStaffRole) guruSelectedJurusan else null
+                            val kelasOverride = if (isStaffRole && guruSelectedJurusan != null) guruSelectedKelas else null
+                            val currentRoleIdx = selectedRoleIndex
+                            val currentUserInput = usernameOrNisn.trim()
+                            val currentPassInput = password.trim()
+                            val shouldRemember = rememberMe
+                            isLoggingIn = true
+
+                            viewModel.login(
+                                usernameOrNisn = currentUserInput,
                                 role = targetRole,
-                                passwordInput = password,
-                                selectedJurusanOverride = if (selectedRoleIndex == 1) guruSelectedJurusan else null,
-                                selectedKelasOverride = if (selectedRoleIndex == 1 && guruSelectedJurusan != null) guruSelectedKelas else null
-                            )
-                            if (success) {
-                                val roleKey = getRoleKey(selectedRoleIndex)
-                                if (rememberMe) {
-                                    authPrefs.edit()
-                                        .putBoolean("remember_$roleKey", true)
-                                        .putString("user_$roleKey", usernameOrNisn.trim())
-                                        .putString("pass_$roleKey", password.trim())
-                                        .putInt("last_role_index", selectedRoleIndex)
-                                        .apply()
+                                passwordInput = currentPassInput,
+                                selectedJurusanOverride = jurusanOverride,
+                                selectedKelasOverride = kelasOverride
+                            ) { isSuccess, message ->
+                                isLoggingIn = false
+                                if (isSuccess) {
+                                    val roleKey = getRoleKey(currentRoleIdx)
+                                    if (shouldRemember) {
+                                        authPrefs.edit()
+                                            .putBoolean("remember_$roleKey", true)
+                                            .putString("user_$roleKey", currentUserInput)
+                                            .putString("pass_$roleKey", currentPassInput)
+                                            .putInt("last_role_index", currentRoleIdx)
+                                            .apply()
+                                    } else {
+                                        authPrefs.edit()
+                                            .putBoolean("remember_$roleKey", false)
+                                            .remove("user_$roleKey")
+                                            .remove("pass_$roleKey")
+                                            .putInt("last_role_index", currentRoleIdx)
+                                            .apply()
+                                    }
+                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                                 } else {
-                                    authPrefs.edit()
-                                        .putBoolean("remember_$roleKey", false)
-                                        .remove("user_$roleKey")
-                                        .remove("pass_$roleKey")
-                                        .putInt("last_role_index", selectedRoleIndex)
-                                        .apply()
+                                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                                 }
-                                Toast.makeText(context, "Selamat datang!", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "Gagal masuk. Periksa kembali NISN/Username atau Kata Sandi.", Toast.LENGTH_LONG).show()
                             }
                         },
+                        enabled = !isLoggingIn,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp)
@@ -993,13 +1066,27 @@ fun LoginScreen(
                             containerColor = if (selectedRoleIndex == 0) ScanGreenPrimary else BrownPrimary
                         )
                     ) {
-                        Icon(imageVector = Icons.Default.Login, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Masuk Sekarang",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
+                        if (isLoggingIn) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Memeriksa Akun...",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                        } else {
+                            Icon(imageVector = Icons.Default.Login, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Masuk Sekarang",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                        }
                     }
 
                     // For Siswa: Show Registration prompt
@@ -1023,7 +1110,7 @@ fun LoginScreen(
                     } else {
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "(Akun Guru dan Admin Pusat dikelola langsung oleh Operator / Kepala Sekolah)",
+                            text = "(Akun Kaprodi, Wali Kelas, Guru BK & Guru Agama dikelola langsung oleh Admin Pusat)",
                             fontSize = 10.5.sp,
                             color = Color.Gray,
                             textAlign = TextAlign.Center

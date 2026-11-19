@@ -572,11 +572,11 @@ fun AdminUserManagementScreen(
         var inputFullName by remember { mutableStateOf("") }
         var inputNip by remember { mutableStateOf("") }
         var inputGender by remember { mutableStateOf(Gender.LAKI_LAKI) }
-        var inputJabatanType by remember { mutableIntStateOf(0) } // 0: Guru Agama/Piket, 1: Wali Kelas, 2: Kaprodi, 3: Guru Umum
+        var inputJabatanType by remember { mutableIntStateOf(0) } // 0: Kaprodi, 1: Wali Kelas, 2: Guru BK, 3: Guru Agama
         var inputSelectedJurusan by remember { mutableStateOf<Jurusan?>(Jurusan.PPLG) }
         var inputKelas by remember { mutableStateOf("XII PPLG") }
         var inputInitialPassword by remember { mutableStateOf("guru") }
-        val jabatanOptions = listOf("Guru Agama / Piket Masjid", "Wali Kelas", "Kaprodi", "Guru Pengajar")
+        val jabatanOptions = listOf("Kaprodi", "Wali Kelas", "Guru BK", "Guru Agama")
 
         AlertDialog(
             onDismissRequest = { showAddTeacherDialog = false },
@@ -595,7 +595,7 @@ fun AdminUserManagementScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "Admin Pusat dapat mendaftarkan akun Guru Agama, Wali Kelas, atau Kaprodi SMKN 1 Pangkajene dan Kepulauan.",
+                        text = "Daftarkan akun Kaprodi, Wali Kelas, Guru BK, atau Guru Agama SMKN 1 Pangkajene dan Kepulauan.",
                         fontSize = 11.sp,
                         color = Color.DarkGray
                     )
@@ -701,7 +701,7 @@ fun AdminUserManagementScreen(
                         }
                     }
 
-                    if (inputJabatanType == 1 || inputJabatanType == 3) {
+                    if (inputJabatanType == 1 || inputJabatanType == 2 || inputJabatanType == 3) {
                         val kelasOptions = remember(inputSelectedJurusan) {
                             viewModel.repository.getKnownClassesForJurusan(inputSelectedJurusan)
                         }
@@ -713,7 +713,7 @@ fun AdminUserManagementScreen(
                                     .horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                if (inputJabatanType == 3) {
+                                if (inputJabatanType != 1) {
                                     FilterChip(
                                         selected = inputKelas.isBlank(),
                                         onClick = { inputKelas = "" },
@@ -764,10 +764,10 @@ fun AdminUserManagementScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val jabatanLabel = jabatanOptions.getOrElse(inputJabatanType) { "Guru" }
+                        val jabatanLabel = jabatanOptions.getOrElse(inputJabatanType) { "Guru Agama" }
                         val kelasValue = when (inputJabatanType) {
-                            1, 3 -> inputKelas.trim().ifEmpty { null }
-                            else -> null // Kaprodi & Guru Agama memantau seluruh kelas pada jurusan terpilih
+                            0 -> null // Kaprodi memantau seluruh kelas pada jurusan terpilih
+                            else -> inputKelas.trim().ifEmpty { null }
                         }
                         val result = viewModel.addTeacher(
                             nipOrUsername = inputNip,
@@ -779,7 +779,7 @@ fun AdminUserManagementScreen(
                             jabatan = jabatanLabel
                         )
                         result.onSuccess { teacher ->
-                            Toast.makeText(context, "Berhasil! Akun Guru '${teacher.fullName}' telah ditambahkan.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Berhasil! Akun '${teacher.fullName}' telah ditambahkan.", Toast.LENGTH_LONG).show()
                             showAddTeacherDialog = false
                         }.onFailure { err ->
                             Toast.makeText(context, "Gagal: ${err.message}", Toast.LENGTH_LONG).show()
